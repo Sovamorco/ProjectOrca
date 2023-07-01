@@ -174,6 +174,9 @@ func (ms *musicSession) streamToVC(vc *discordgo.VoiceConnection, done chan erro
 			}
 			return
 		}
+		for i := range pcmFrame {
+			pcmFrame[i] *= ms.volume
+		}
 		packet, err := enc.EncodeFloat32(pcmFrame, frameSize, bufferSize)
 		if err != nil {
 			done <- errors.Wrap(err, "encode pcm to opus")
@@ -230,6 +233,7 @@ func playSound(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.Int
 		stream:    stream,
 		streamURL: streamURL,
 		stop:      make(chan struct{}),
+		volume:    1,
 	}
 	currentms = &ms
 
@@ -286,9 +290,9 @@ func volumeHandler(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo
 		return errors.New("missing volume")
 	}
 	volume := options[0].Value.(float64)
-	logger.Infof("set volume to %f%", volume)
-	currentms.volume = float32(volume)
-	return respond(s, i, fmt.Sprintf("set volume to %f%", volume))
+	logger.Infof("set volume to %f%%", volume)
+	currentms.volume = float32(volume / 100)
+	return respond(s, i, fmt.Sprintf("set volume to %.2f%%", volume))
 }
 
 func stopHandler(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.InteractionCreate) error {
