@@ -12,7 +12,6 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"strings"
 	"syscall"
 )
 
@@ -27,48 +26,61 @@ func respond(s *discordgo.Session, i *discordgo.InteractionCreate, message strin
 	})
 }
 
-func getYTDLPStream(url string) (*exec.Cmd, io.Reader, error) {
-	ffmpegArgs := []string{
-		"-acodec",
-		"libopus",
-		"-f",
-		"ogg",
-		"-vbr",
-		"on",
-		"-ar",
-		"48000",
-		"-ac",
-		"2",
-		"-b:a",
-		"64000",
-		"-application",
-		"audio",
-		"-frame_duration",
-		"20",
-		"-packet_loss",
-		"1",
-	}
-	cmd := []string{
-		"-x",
-		"--audio-format",
-		"opus",
-		"--postprocessor-args",
-		"ffmpeg:" + strings.Join(ffmpegArgs, " "),
-		"-o",
-		"-",
+func getStream(url string) (*exec.Cmd, io.Reader, error) {
+	ytdlpArgs := []string{
+		"-f", "ba[acodec=opus]/ba*[acodec=opus]/ba*",
+		"--get-url",
 		url,
 	}
-	ytdlp := exec.Command("yt-dlp", cmd...)
+	ytdlp := exec.Command("yt-dlp", ytdlpArgs...)
 	stdout, err := ytdlp.StdoutPipe()
 	if err != nil {
-		return nil, nil, errors.Wrap(err, "get stdout pipe")
+		return nil, nil, errors.Wrap(err, "get ytdlp stdout pipe")
 	}
-	buf := bufio.NewReader(stdout)
 	err = ytdlp.Start()
 	if err != nil {
-		return nil, nil, errors.Wrap(err, "start ytdlp process")
+		return nil, nil, errors.Wrap(err, "start ytdlp")
 	}
-	return ytdlp, buf, nil
+	streamURLB, err := io.ReadAll(stdout)
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "read stream url")
+	}
+	err = ytdlp.Wait()
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "wait for ytdlp")
+	}
+	streamURL := string(streamURLB)
+	ffmpegArgs := []string{
+		"-reconnect", "1",
+		"-reconnect_at_eof", "1",
+		"-reconnect_streamed", "1",
+		"-reconnect_delay_max", "2",
+		"-i", streamURL,
+		"-map", "0:a",
+		"-acodec", "libopus",
+		"-f", "ogg",
+		"-vbr", "on",
+		"-ar", "48000",
+		"-ac", "2",
+		"-b:a", "64000",
+		"-application", "audio",
+		"-frame_duration", "20",
+		"-packet_loss", "1",
+		"-threads", "0",
+		"-ss", "0",
+		"pipe:1",
+	}
+	ffmpeg := exec.Command("ffmpeg", ffmpegArgs...)
+	stdout, err = ffmpeg.StdoutPipe()
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "get ffmpeg stdout pipe")
+	}
+	buf := bufio.NewReader(stdout)
+	err = ffmpeg.Start()
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "start ffmpeg process")
+	}
+	return ffmpeg, buf, nil
 }
 
 func streamToVC(reader io.Reader, vc *discordgo.VoiceConnection, done chan error) error {
@@ -123,7 +135,7 @@ func playSound(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.Int
 		logger.Error("Error responding to play command: ", err)
 	}
 
-	cmd, stream, err := getYTDLPStream(url)
+	cmd, stream, err := getStream(url)
 	if err != nil {
 		return errors.Wrap(err, "get ytdlp stream")
 	}
