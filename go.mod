@@ -3,6 +3,7 @@ module RaccoonBotMusic
 go 1.21
 
 require (
+	github.com/Eyevinn/mp4ff v0.36.0
 	github.com/bwmarrin/discordgo v0.27.1
 	github.com/ebml-go/webm v0.0.0-20221117133942-84fa5245cf70
 	github.com/jfbus/httprs v1.0.1
