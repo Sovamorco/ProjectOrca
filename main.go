@@ -69,7 +69,7 @@ func respond(s *discordgo.Session, i *discordgo.InteractionCreate, message strin
 
 func getStreamURL(url string) (string, error) {
 	ytdlpArgs := []string{
-		"-f", "ba[acodec=opus]/ba*[acodec=opus]/ba*",
+		"-f", "ba[acodec=opus]/ba/ba*[acodec=opus]/ba*",
 		"--get-url",
 		url,
 	}
@@ -90,7 +90,7 @@ func getStreamURL(url string) (string, error) {
 	if err != nil {
 		return "", errors.Wrap(err, "wait for ytdlp")
 	}
-	return string(streamURLB), nil
+	return strings.TrimSpace(string(streamURLB)), nil
 }
 
 func getStream(streamURL string, pos time.Duration) (*exec.Cmd, io.ReadCloser, error) {
@@ -99,7 +99,7 @@ func getStream(streamURL string, pos time.Duration) (*exec.Cmd, io.ReadCloser, e
 		"-reconnect_streamed", "1",
 		"-reconnect_delay_max", "2",
 	}
-	if !strings.Contains(streamURL, "index.m3u8") {
+	if !strings.Contains(streamURL, ".m3u8") {
 		ffmpegArgs = append(ffmpegArgs,
 			"-reconnect_at_eof", "1",
 			"-ss", fmt.Sprintf("%f", pos.Seconds()),
@@ -114,8 +114,6 @@ func getStream(streamURL string, pos time.Duration) (*exec.Cmd, io.ReadCloser, e
 		"-ac", "2",
 		"-frame_duration", "20",
 		"-packet_loss", "1",
-		"-fec",
-		"-threads", "0",
 		"pipe:1",
 	)
 	ffmpeg := exec.Command("ffmpeg", ffmpegArgs...)
