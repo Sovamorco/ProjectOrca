@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"github.com/jonas747/dca"
 	"io"
 	"os"
 	"os/signal"
@@ -10,6 +9,7 @@ import (
 	"syscall"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/ebml-go/webm"
 	"github.com/kkdai/youtube/v2"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -115,30 +115,51 @@ func playSound(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.Int
 	if err != nil {
 		return errors.Wrap(err, "select audio format")
 	}
-
-	options := dca.StdEncodeOptions
-	options.RawOutput = true
-	options.Bitrate = 96
-	options.Application = dca.AudioApplicationAudio
-	sess, err := dca.EncodeFile(format.URL, options)
+	streamURL, err := ytClient.GetStreamURL(video, format)
 	if err != nil {
-		return errors.Wrap(err, "encode to dca")
+		return errors.Wrap(err, "get stream url")
 	}
-	defer sess.Cleanup()
-
-	done := make(chan error)
-	dca.NewStream(sess, vc, done)
+	stream, err := streamFromURL(streamURL)
+	if err != nil {
+		return errors.Wrap(err, "get stream")
+	}
+	logger.Debug(stream)
 
 	err = respond(s, i, fmt.Sprintf("playing %s by %s", video.Title, video.Author))
 	if err != nil {
 		logger.Error("Error responding to play command: ", err)
 	}
 
-	err = <-done
-	if !errors.Is(err, io.EOF) {
-		return errors.Wrap(err, "stream audio")
+	var m webm.WebM
+	reader, err := webm.Parse(stream, &m)
+	if err != nil {
+		return errors.Wrap(err, "parse webm")
 	}
+
+	fmt.Println(m)
+	fmt.Println(reader)
+
+	for block := range reader.Chan {
+		vc.OpusSend <- block.Data
+	}
+
 	return nil
+
+	//streamChan := make(chan []byte, 5)
+	//doneChan := make(chan error)
+	//err = readWebm(stream, streamChan, doneChan)
+	//if err != nil {
+	//	return errors.Wrap(err, "start webm read")
+	//}
+	//
+	//for {
+	//	select {
+	//	case blockData := <-streamChan:
+	//		vc.OpusSend <- blockData
+	//	case err = <-doneChan:
+	//		return errors.Wrap(err, "webm read")
+	//	}
+	//}
 }
 
 func playHandler(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.InteractionCreate) error {
