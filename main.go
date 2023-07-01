@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"github.com/bwmarrin/discordgo"
-	"github.com/pion/opus/pkg/oggreader"
+	"github.com/jonas747/ogg"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -12,10 +12,51 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strings"
+	"sync"
 	"syscall"
+	"time"
 )
 
+type musicSession struct {
+	sync.Mutex
+	logger    *zap.SugaredLogger
+	cmd       *exec.Cmd
+	stream    io.ReadCloser
+	streamURL string
+	decoder   *ogg.PacketDecoder
+	stop      chan struct{}
+}
+
 type CommandHandler func(*zap.SugaredLogger, *discordgo.Session, *discordgo.InteractionCreate) error
+
+var currentms *musicSession
+
+func (ms *musicSession) seek(pos time.Duration) error {
+	cmd, stream, err := getStream(ms.streamURL, pos)
+	if err != nil {
+		return errors.Wrap(err, "get stream")
+	}
+	ms.Lock()
+	err = ms.stream.Close()
+	if err != nil {
+		ms.logger.Error("Error closing old stream: ", err)
+	}
+	ms.stream = stream
+	ms.cmd = cmd
+	ms.decoder = ogg.NewPacketDecoder(ogg.NewDecoder(stream))
+	ms.Unlock()
+	return nil
+}
+
+func empty[T any](c chan T) {
+	for len(c) != 0 {
+		select {
+		case <-c:
+		default:
+		}
+	}
+}
 
 func respond(s *discordgo.Session, i *discordgo.InteractionCreate, message string) error {
 	return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -26,7 +67,7 @@ func respond(s *discordgo.Session, i *discordgo.InteractionCreate, message strin
 	})
 }
 
-func getStream(url string) (*exec.Cmd, io.Reader, error) {
+func getStreamURL(url string) (string, error) {
 	ytdlpArgs := []string{
 		"-f", "ba[acodec=opus]/ba*[acodec=opus]/ba*",
 		"--get-url",
@@ -35,47 +76,61 @@ func getStream(url string) (*exec.Cmd, io.Reader, error) {
 	ytdlp := exec.Command("yt-dlp", ytdlpArgs...)
 	stdout, err := ytdlp.StdoutPipe()
 	if err != nil {
-		return nil, nil, errors.Wrap(err, "get ytdlp stdout pipe")
+		return "", errors.Wrap(err, "get ytdlp stdout pipe")
 	}
 	err = ytdlp.Start()
 	if err != nil {
-		return nil, nil, errors.Wrap(err, "start ytdlp")
+		return "", errors.Wrap(err, "start ytdlp")
 	}
 	streamURLB, err := io.ReadAll(stdout)
 	if err != nil {
-		return nil, nil, errors.Wrap(err, "read stream url")
+		return "", errors.Wrap(err, "read stream url")
 	}
 	err = ytdlp.Wait()
 	if err != nil {
-		return nil, nil, errors.Wrap(err, "wait for ytdlp")
+		return "", errors.Wrap(err, "wait for ytdlp")
 	}
-	streamURL := string(streamURLB)
+	return string(streamURLB), nil
+}
+
+func getStream(streamURL string, pos time.Duration) (*exec.Cmd, io.ReadCloser, error) {
 	ffmpegArgs := []string{
 		"-reconnect", "1",
-		"-reconnect_at_eof", "1",
 		"-reconnect_streamed", "1",
 		"-reconnect_delay_max", "2",
+	}
+	if !strings.Contains(streamURL, "index.m3u8") {
+		ffmpegArgs = append(ffmpegArgs,
+			"-reconnect_at_eof", "1",
+			"-ss", fmt.Sprintf("%f", pos.Seconds()),
+		)
+	}
+	ffmpegArgs = append(ffmpegArgs,
 		"-i", streamURL,
 		"-map", "0:a",
 		"-acodec", "libopus",
 		"-f", "ogg",
-		"-vbr", "on",
 		"-ar", "48000",
 		"-ac", "2",
-		"-b:a", "64000",
-		"-application", "audio",
 		"-frame_duration", "20",
 		"-packet_loss", "1",
+		"-fec",
 		"-threads", "0",
-		"-ss", "0",
 		"pipe:1",
-	}
+	)
 	ffmpeg := exec.Command("ffmpeg", ffmpegArgs...)
-	stdout, err = ffmpeg.StdoutPipe()
+	stdout, err := ffmpeg.StdoutPipe()
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "get ffmpeg stdout pipe")
 	}
-	buf := bufio.NewReader(stdout)
+	// make a.. BufferedReadCloser I guess?
+	buf := struct {
+		io.Reader
+		io.Closer
+	}{
+		bufio.NewReader(stdout),
+		stdout,
+	}
 	err = ffmpeg.Start()
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "start ffmpeg process")
@@ -83,28 +138,31 @@ func getStream(url string) (*exec.Cmd, io.Reader, error) {
 	return ffmpeg, buf, nil
 }
 
-func streamToVC(reader io.Reader, vc *discordgo.VoiceConnection, done chan error) error {
-	r, _, err := oggreader.NewWith(reader)
-	if err != nil {
-		return errors.Wrap(err, "create oggreader")
-	}
-
-	go func() {
-		defer close(done)
-		for {
-			page, _, err := r.ParseNextPage()
-			if err != nil {
-				if !errors.Is(err, io.EOF) {
-					done <- err
-				}
-				return
-			}
-			for _, packet := range page {
-				vc.OpusSend <- packet
-			}
+func (ms *musicSession) streamToVC(vc *discordgo.VoiceConnection, done chan error) {
+	defer close(done)
+	defer func(stream io.ReadCloser) {
+		err := stream.Close()
+		if err != nil && !errors.Is(err, os.ErrClosed) {
+			ms.logger.Error("Error closing stream: ", err)
 		}
-	}()
-	return nil
+	}(ms.stream)
+	for {
+		ms.Lock()
+		packet, _, err := ms.decoder.Decode()
+		ms.Unlock()
+		if err != nil {
+			if !errors.Is(err, io.EOF) {
+				done <- err
+			}
+			return
+		}
+		select {
+		case <-ms.stop:
+			empty(ms.stop)
+			return
+		case vc.OpusSend <- packet:
+		}
+	}
 }
 
 func playSound(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.InteractionCreate, guildID, channelID, url string) error {
@@ -135,18 +193,27 @@ func playSound(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.Int
 		logger.Error("Error responding to play command: ", err)
 	}
 
-	cmd, stream, err := getStream(url)
+	streamURL, err := getStreamURL(url)
 	if err != nil {
-		return errors.Wrap(err, "get ytdlp stream")
+		return errors.Wrap(err, "get stream url")
 	}
-	logger.Debug(cmd)
+	cmd, stream, err := getStream(streamURL, 0)
+	if err != nil {
+		return errors.Wrap(err, "get stream")
+	}
+	ms := musicSession{
+		logger:    logger,
+		cmd:       cmd,
+		stream:    stream,
+		streamURL: streamURL,
+		decoder:   ogg.NewPacketDecoder(ogg.NewDecoder(stream)),
+		stop:      make(chan struct{}),
+	}
+	currentms = &ms
 
 	done := make(chan error, 1)
 
-	err = streamToVC(stream, vc, done)
-	if err != nil {
-		return errors.Wrap(err, "init stream to vc")
-	}
+	go ms.streamToVC(vc, done)
 
 	err = <-done
 	return errors.Wrap(err, "stream to vc")
@@ -176,23 +243,26 @@ func playHandler(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.I
 	return nil
 }
 
-//func seekHandler(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.InteractionCreate) error {
-//	options := i.ApplicationCommandData().Options
-//	if len(options) < 1 {
-//		return errors.New("missing seek point")
-//	}
-//	tcF := options[0].Value.(float64)
-//	tc := time.Duration(tcF)
-//	logger.Infof("seek to %ds", tc)
-//	currentms.seek(time.Second * tc)
-//	return respond(s, i, fmt.Sprintf("seek to %ds", tc))
-//}
-//
-//func stopHandler(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.InteractionCreate) error {
-//	logger.Info("Stop current track")
-//	currentms.stop()
-//	return respond(s, i, "stopped")
-//}
+func seekHandler(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.InteractionCreate) error {
+	options := i.ApplicationCommandData().Options
+	if len(options) < 1 {
+		return errors.New("missing seek point")
+	}
+	tcF := options[0].Value.(float64)
+	tc := time.Duration(tcF)
+	logger.Infof("seek to %ds", tc)
+	err := currentms.seek(time.Second * tc)
+	if err != nil {
+		return errors.Wrap(err, "seek")
+	}
+	return respond(s, i, fmt.Sprintf("seek to %ds", tc))
+}
+
+func stopHandler(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.InteractionCreate) error {
+	logger.Info("Stop current track")
+	currentms.stop <- struct{}{}
+	return respond(s, i, "stopped")
+}
 
 var commands = []*discordgo.ApplicationCommand{
 	{
@@ -200,7 +270,7 @@ var commands = []*discordgo.ApplicationCommand{
 		Description: "testing command",
 	},
 	{
-		Name:        "rcplay",
+		Name:        "play",
 		Description: "play music",
 		Options: []*discordgo.ApplicationCommandOption{
 			{
@@ -233,9 +303,9 @@ var commandHandlers = map[string]CommandHandler{
 	"test": func(_ *zap.SugaredLogger, s *discordgo.Session, i *discordgo.InteractionCreate) error {
 		return respond(s, i, "test command pog")
 	},
-	"rcplay": playHandler,
-	//"seek":   seekHandler,
-	//"stop":   stopHandler,
+	"play": playHandler,
+	"seek": seekHandler,
+	"stop": stopHandler,
 }
 
 func readyHandlerWrapper(logger *zap.SugaredLogger) func(s *discordgo.Session, _ *discordgo.Ready) {
@@ -312,7 +382,11 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
-		delete(registeredCommandsMap, v.Name)
+		if _, ok := registeredCommandsMap[v.Name]; ok {
+			delete(registeredCommandsMap, v.Name)
+		} else {
+			logger.Info("Adding new command: ", v.Name)
+		}
 	}
 	for name, oldCommand := range registeredCommandsMap {
 		logger.Info("Removing old command: ", name)

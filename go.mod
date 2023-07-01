@@ -5,7 +5,7 @@ go 1.21
 require (
 	github.com/bwmarrin/discordgo v0.27.1
 	github.com/jfbus/httprs v1.0.1
-	github.com/pion/opus v0.0.0-20230518193850-25d4c9ab42c4
+	github.com/jonas747/ogg v0.0.0-20161220051205-b4f6f4cf3757
 	github.com/pkg/errors v0.9.1
 	go.uber.org/zap v1.24.0
 )
