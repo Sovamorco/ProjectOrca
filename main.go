@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"github.com/bwmarrin/discordgo"
-	"github.com/jonas747/ogg"
+	"github.com/pion/opus/pkg/oggreader"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strings"
 	"syscall"
 )
 
@@ -27,7 +28,37 @@ func respond(s *discordgo.Session, i *discordgo.InteractionCreate, message strin
 }
 
 func getYTDLPStream(url string) (*exec.Cmd, io.Reader, error) {
-	ytdlp := exec.Command("yt-dlp", "-x", "--audio-format", "opus", "-o", "-", url)
+	ffmpegArgs := []string{
+		"-acodec",
+		"libopus",
+		"-f",
+		"ogg",
+		"-vbr",
+		"on",
+		"-ar",
+		"48000",
+		"-ac",
+		"2",
+		"-b:a",
+		"64000",
+		"-application",
+		"audio",
+		"-frame_duration",
+		"20",
+		"-packet_loss",
+		"1",
+	}
+	cmd := []string{
+		"-x",
+		"--audio-format",
+		"opus",
+		"--postprocessor-args",
+		"ffmpeg:" + strings.Join(ffmpegArgs, " "),
+		"-o",
+		"-",
+		url,
+	}
+	ytdlp := exec.Command("yt-dlp", cmd...)
 	stdout, err := ytdlp.StdoutPipe()
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "get stdout pipe")
@@ -41,19 +72,24 @@ func getYTDLPStream(url string) (*exec.Cmd, io.Reader, error) {
 }
 
 func streamToVC(reader io.Reader, vc *discordgo.VoiceConnection, done chan error) error {
-	d := ogg.NewPacketDecoder(ogg.NewDecoder(reader))
+	r, _, err := oggreader.NewWith(reader)
+	if err != nil {
+		return errors.Wrap(err, "create oggreader")
+	}
 
 	go func() {
 		defer close(done)
 		for {
-			packet, _, err := d.Decode()
+			page, _, err := r.ParseNextPage()
 			if err != nil {
 				if !errors.Is(err, io.EOF) {
 					done <- err
 				}
 				return
 			}
-			vc.OpusSend <- packet
+			for _, packet := range page {
+				vc.OpusSend <- packet
+			}
 		}
 	}()
 	return nil
