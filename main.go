@@ -1,52 +1,21 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"github.com/bwmarrin/discordgo"
+	"github.com/jonas747/ogg"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"syscall"
-	"time"
 )
-
-type musicStream interface {
-	stop()
-	seek(time.Duration)
-	sendToVC(chan struct{}, *discordgo.VoiceConnection)
-}
 
 type CommandHandler func(*zap.SugaredLogger, *discordgo.Session, *discordgo.InteractionCreate) error
-
-type mediaFormat string
-
-type musicStreamData struct {
-	streamURL string
-	format    mediaFormat
-	title     string
-}
-
-type streamExtractor struct {
-	key       func(string) bool
-	extractor func(*zap.SugaredLogger, string) (*musicStreamData, error)
-}
-
-var (
-	mediaFormatWebmOpus mediaFormat = "webm,opus"
-	mediaFormatMp4      mediaFormat = "mp4"
-
-	streamExtractors = []streamExtractor{
-		{
-			key:       ytKey,
-			extractor: ytExtractor,
-		},
-	}
-
-	currentms musicStream
-)
 
 func respond(s *discordgo.Session, i *discordgo.InteractionCreate, message string) error {
 	return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -57,14 +26,37 @@ func respond(s *discordgo.Session, i *discordgo.InteractionCreate, message strin
 	})
 }
 
-func constructMusicStream(format mediaFormat, stream io.ReadSeeker) (musicStream, error) {
-	switch format {
-	case mediaFormatWebmOpus:
-		return newWebmMusicStream(stream)
-	case mediaFormatMp4:
-		return newMp4MusicStream(stream)
+func getYTDLPStream(url string) (*exec.Cmd, io.Reader, error) {
+	ytdlp := exec.Command("yt-dlp", "-x", "--audio-format", "opus", "-o", "-", url)
+	stdout, err := ytdlp.StdoutPipe()
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "get stdout pipe")
 	}
-	return nil, fmt.Errorf("format %s does not have media stream constructor", format)
+	buf := bufio.NewReader(stdout)
+	err = ytdlp.Start()
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "start ytdlp process")
+	}
+	return ytdlp, buf, nil
+}
+
+func streamToVC(reader io.Reader, vc *discordgo.VoiceConnection, done chan error) error {
+	d := ogg.NewPacketDecoder(ogg.NewDecoder(reader))
+
+	go func() {
+		defer close(done)
+		for {
+			packet, _, err := d.Decode()
+			if err != nil {
+				if !errors.Is(err, io.EOF) {
+					done <- err
+				}
+				return
+			}
+			vc.OpusSend <- packet
+		}
+	}()
+	return nil
 }
 
 func playSound(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.InteractionCreate, guildID, channelID, url string) error {
@@ -79,20 +71,6 @@ func playSound(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.Int
 		}
 	}(vc)
 
-	var data *musicStreamData
-	for _, extractor := range streamExtractors {
-		if extractor.key(url) {
-			data, err = extractor.extractor(logger, url)
-			if err != nil {
-				return errors.Wrap(err, "extract stream url")
-			}
-			break
-		}
-	}
-	if data == nil {
-		return fmt.Errorf("URL \"%s\" does not match any extractors", url)
-	}
-
 	err = vc.Speaking(true)
 	if err != nil {
 		return errors.Wrap(err, "set speaking state")
@@ -104,30 +82,26 @@ func playSound(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.Int
 		}
 	}(vc, false)
 
-	err = respond(s, i, fmt.Sprintf("playing %s", data.title))
+	err = respond(s, i, fmt.Sprintf("playing %s", "test"))
 	if err != nil {
 		logger.Error("Error responding to play command: ", err)
 	}
 
-	stream, err := streamFromURL(data.streamURL)
+	cmd, stream, err := getYTDLPStream(url)
 	if err != nil {
-		return errors.Wrap(err, "get stream")
+		return errors.Wrap(err, "get ytdlp stream")
 	}
-	logger.Debug(stream)
+	logger.Debug(cmd)
 
-	done := make(chan struct{}, 1)
+	done := make(chan error, 1)
 
-	ms, err := constructMusicStream(data.format, stream)
+	err = streamToVC(stream, vc, done)
 	if err != nil {
-		return errors.Wrap(err, "create music stream")
+		return errors.Wrap(err, "init stream to vc")
 	}
-	currentms = ms
 
-	go ms.sendToVC(done, vc)
-
-	<-done
-
-	return nil
+	err = <-done
+	return errors.Wrap(err, "stream to vc")
 }
 
 func playHandler(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.InteractionCreate) error {
@@ -154,23 +128,23 @@ func playHandler(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.I
 	return nil
 }
 
-func seekHandler(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.InteractionCreate) error {
-	options := i.ApplicationCommandData().Options
-	if len(options) < 1 {
-		return errors.New("missing seek point")
-	}
-	tcF := options[0].Value.(float64)
-	tc := time.Duration(tcF)
-	logger.Infof("seek to %ds", tc)
-	currentms.seek(time.Second * tc)
-	return respond(s, i, fmt.Sprintf("seek to %ds", tc))
-}
-
-func stopHandler(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.InteractionCreate) error {
-	logger.Info("Stop current track")
-	currentms.stop()
-	return respond(s, i, "stopped")
-}
+//func seekHandler(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.InteractionCreate) error {
+//	options := i.ApplicationCommandData().Options
+//	if len(options) < 1 {
+//		return errors.New("missing seek point")
+//	}
+//	tcF := options[0].Value.(float64)
+//	tc := time.Duration(tcF)
+//	logger.Infof("seek to %ds", tc)
+//	currentms.seek(time.Second * tc)
+//	return respond(s, i, fmt.Sprintf("seek to %ds", tc))
+//}
+//
+//func stopHandler(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.InteractionCreate) error {
+//	logger.Info("Stop current track")
+//	currentms.stop()
+//	return respond(s, i, "stopped")
+//}
 
 var commands = []*discordgo.ApplicationCommand{
 	{
@@ -212,8 +186,8 @@ var commandHandlers = map[string]CommandHandler{
 		return respond(s, i, "test command pog")
 	},
 	"rcplay": playHandler,
-	"seek":   seekHandler,
-	"stop":   stopHandler,
+	//"seek":   seekHandler,
+	//"stop":   stopHandler,
 }
 
 func readyHandlerWrapper(logger *zap.SugaredLogger) func(s *discordgo.Session, _ *discordgo.Ready) {
