@@ -1,10 +1,11 @@
 package main
 
 import (
+	"RaccoonBotMusic/opus"
 	"bufio"
+	"encoding/binary"
 	"fmt"
 	"github.com/bwmarrin/discordgo"
-	"github.com/jonas747/ogg"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -24,9 +25,16 @@ type musicSession struct {
 	cmd       *exec.Cmd
 	stream    io.ReadCloser
 	streamURL string
-	decoder   *ogg.PacketDecoder
 	stop      chan struct{}
+	volume    float32
 }
+
+const (
+	sampleRate = 48000
+	channels   = 1
+	frameSize  = channels * 20 * sampleRate / 1000
+	bufferSize = frameSize * 4
+)
 
 type CommandHandler func(*zap.SugaredLogger, *discordgo.Session, *discordgo.InteractionCreate) error
 
@@ -43,8 +51,11 @@ func (ms *musicSession) seek(pos time.Duration) error {
 		ms.logger.Error("Error closing old stream: ", err)
 	}
 	ms.stream = stream
+	err = ms.cmd.Process.Kill()
+	if err != nil {
+		ms.logger.Error("Error killing old ffmpeg: ", err)
+	}
 	ms.cmd = cmd
-	ms.decoder = ogg.NewPacketDecoder(ogg.NewDecoder(stream))
 	ms.Unlock()
 	return nil
 }
@@ -107,13 +118,9 @@ func getStream(streamURL string, pos time.Duration) (*exec.Cmd, io.ReadCloser, e
 	}
 	ffmpegArgs = append(ffmpegArgs,
 		"-i", streamURL,
-		"-map", "0:a",
-		"-acodec", "libopus",
-		"-f", "ogg",
-		"-ar", "48000",
-		"-ac", "2",
-		"-frame_duration", "20",
-		"-packet_loss", "1",
+		"-f", "f32be",
+		"-ar", fmt.Sprintf("%d", sampleRate),
+		"-ac", fmt.Sprintf("%d", channels),
 		"pipe:1",
 	)
 	ffmpeg := exec.Command("ffmpeg", ffmpegArgs...)
@@ -126,7 +133,7 @@ func getStream(streamURL string, pos time.Duration) (*exec.Cmd, io.ReadCloser, e
 		io.Reader
 		io.Closer
 	}{
-		bufio.NewReader(stdout),
+		bufio.NewReaderSize(stdout, frameSize*5),
 		stdout,
 	}
 	err = ffmpeg.Start()
@@ -144,14 +151,32 @@ func (ms *musicSession) streamToVC(vc *discordgo.VoiceConnection, done chan erro
 			ms.logger.Error("Error closing stream: ", err)
 		}
 	}(ms.stream)
+	defer func(Process *os.Process) {
+		err := Process.Kill()
+		if err != nil {
+			ms.logger.Error("Error killing ffmpeg process: ", err)
+		}
+	}(ms.cmd.Process)
+	pcmFrame := make([]float32, frameSize)
+	//buffer := make([]byte, bufferSize)
+	enc, err := opus.NewEncoder(sampleRate, channels, opus.Audio)
+	if err != nil {
+		done <- errors.Wrap(err, "create opus encoder")
+		return
+	}
 	for {
 		ms.Lock()
-		packet, _, err := ms.decoder.Decode()
+		err := binary.Read(ms.stream, binary.BigEndian, pcmFrame)
 		ms.Unlock()
 		if err != nil {
 			if !errors.Is(err, io.EOF) {
-				done <- err
+				done <- errors.Wrap(err, "read audio stream")
 			}
+			return
+		}
+		packet, err := enc.EncodeFloat32(pcmFrame, frameSize, bufferSize)
+		if err != nil {
+			done <- errors.Wrap(err, "encode pcm to opus")
 			return
 		}
 		select {
@@ -175,16 +200,16 @@ func playSound(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.Int
 		}
 	}(vc)
 
-	err = vc.Speaking(true)
-	if err != nil {
-		return errors.Wrap(err, "set speaking state")
-	}
-	defer func(vc *discordgo.VoiceConnection, b bool) {
-		err := vc.Speaking(b)
-		if err != nil {
-			logger.Error("Error setting speaking state: ", err)
-		}
-	}(vc, false)
+	//err = vc.Speaking(true)
+	//if err != nil {
+	//	return errors.Wrap(err, "set speaking state")
+	//}
+	//defer func(vc *discordgo.VoiceConnection, b bool) {
+	//	err := vc.Speaking(b)
+	//	if err != nil {
+	//		logger.Error("Error setting speaking state: ", err)
+	//	}
+	//}(vc, false)
 
 	err = respond(s, i, fmt.Sprintf("playing %s", "test"))
 	if err != nil {
@@ -204,7 +229,6 @@ func playSound(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.Int
 		cmd:       cmd,
 		stream:    stream,
 		streamURL: streamURL,
-		decoder:   ogg.NewPacketDecoder(ogg.NewDecoder(stream)),
 		stop:      make(chan struct{}),
 	}
 	currentms = &ms
@@ -256,6 +280,17 @@ func seekHandler(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.I
 	return respond(s, i, fmt.Sprintf("seek to %ds", tc))
 }
 
+func volumeHandler(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.InteractionCreate) error {
+	options := i.ApplicationCommandData().Options
+	if len(options) < 1 {
+		return errors.New("missing volume")
+	}
+	volume := options[0].Value.(float64)
+	logger.Infof("set volume to %f%", volume)
+	currentms.volume = float32(volume)
+	return respond(s, i, fmt.Sprintf("set volume to %f%", volume))
+}
+
 func stopHandler(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.InteractionCreate) error {
 	logger.Info("Stop current track")
 	currentms.stop <- struct{}{}
@@ -292,6 +327,18 @@ var commands = []*discordgo.ApplicationCommand{
 		},
 	},
 	{
+		Name:        "volume",
+		Description: "change volume",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Name:        "volume",
+				Description: "volume in percent to scale to",
+				Type:        discordgo.ApplicationCommandOptionNumber,
+				Required:    true,
+			},
+		},
+	},
+	{
 		Name:        "stop",
 		Description: "stop current track",
 	},
@@ -301,9 +348,10 @@ var commandHandlers = map[string]CommandHandler{
 	"test": func(_ *zap.SugaredLogger, s *discordgo.Session, i *discordgo.InteractionCreate) error {
 		return respond(s, i, "test command pog")
 	},
-	"play": playHandler,
-	"seek": seekHandler,
-	"stop": stopHandler,
+	"play":   playHandler,
+	"seek":   seekHandler,
+	"volume": volumeHandler,
+	"stop":   stopHandler,
 }
 
 func readyHandlerWrapper(logger *zap.SugaredLogger) func(s *discordgo.Session, _ *discordgo.Ready) {
