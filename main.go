@@ -1,9 +1,6 @@
 package main
 
 import (
-	"RaccoonBotMusic/opus"
-	"bufio"
-	"encoding/binary"
 	"fmt"
 	"github.com/bwmarrin/discordgo"
 	"github.com/pkg/errors"
@@ -11,54 +8,12 @@ import (
 	"go.uber.org/zap/zapcore"
 	"io"
 	"os"
-	"os/exec"
 	"os/signal"
-	"strings"
-	"sync"
 	"syscall"
 	"time"
 )
 
-type musicSession struct {
-	sync.Mutex
-	logger    *zap.SugaredLogger
-	cmd       *exec.Cmd
-	stream    io.ReadCloser
-	streamURL string
-	stop      chan struct{}
-	volume    float32
-}
-
-const (
-	sampleRate = 48000
-	channels   = 1
-	frameSize  = channels * 20 * sampleRate / 1000
-	bufferSize = frameSize * 4
-)
-
 type CommandHandler func(*zap.SugaredLogger, *discordgo.Session, *discordgo.InteractionCreate) error
-
-var currentms *musicSession
-
-func (ms *musicSession) seek(pos time.Duration) error {
-	cmd, stream, err := getStream(ms.streamURL, pos)
-	if err != nil {
-		return errors.Wrap(err, "get stream")
-	}
-	ms.Lock()
-	err = ms.stream.Close()
-	if err != nil {
-		ms.logger.Error("Error closing old stream: ", err)
-	}
-	ms.stream = stream
-	err = ms.cmd.Process.Kill()
-	if err != nil {
-		ms.logger.Error("Error killing old ffmpeg: ", err)
-	}
-	ms.cmd = cmd
-	ms.Unlock()
-	return nil
-}
 
 func empty[T any](c chan T) {
 	for len(c) != 0 {
@@ -69,126 +24,33 @@ func empty[T any](c chan T) {
 	}
 }
 
+func respondAck(s *discordgo.Session, i *discordgo.InteractionCreate) error {
+	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
+	})
+	if re, ok := err.(*discordgo.RESTError); ok {
+		if re.Message.Code == discordgo.ErrCodeInteractionHasAlreadyBeenAcknowledged {
+			err = nil
+		}
+	}
+	return err
+}
+
 func respond(s *discordgo.Session, i *discordgo.InteractionCreate, message string) error {
-	return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Content: message,
 		},
 	})
-}
-
-func getStreamURL(url string) (string, error) {
-	ytdlpArgs := []string{
-		"-f", "ba[acodec=opus]/ba/ba*[acodec=opus]/ba*",
-		"--get-url",
-		url,
-	}
-	ytdlp := exec.Command("yt-dlp", ytdlpArgs...)
-	stdout, err := ytdlp.StdoutPipe()
-	if err != nil {
-		return "", errors.Wrap(err, "get ytdlp stdout pipe")
-	}
-	err = ytdlp.Start()
-	if err != nil {
-		return "", errors.Wrap(err, "start ytdlp")
-	}
-	streamURLB, err := io.ReadAll(stdout)
-	if err != nil {
-		return "", errors.Wrap(err, "read stream url")
-	}
-	err = ytdlp.Wait()
-	if err != nil {
-		return "", errors.Wrap(err, "wait for ytdlp")
-	}
-	return strings.TrimSpace(string(streamURLB)), nil
-}
-
-func getStream(streamURL string, pos time.Duration) (*exec.Cmd, io.ReadCloser, error) {
-	ffmpegArgs := []string{
-		"-reconnect", "1",
-		"-reconnect_streamed", "1",
-		"-reconnect_delay_max", "2",
-	}
-	if !strings.Contains(streamURL, ".m3u8") {
-		ffmpegArgs = append(ffmpegArgs,
-			"-reconnect_at_eof", "1",
-			"-ss", fmt.Sprintf("%f", pos.Seconds()),
-		)
-	}
-	ffmpegArgs = append(ffmpegArgs,
-		"-i", streamURL,
-		"-f", "f32be",
-		"-ar", fmt.Sprintf("%d", sampleRate),
-		"-ac", fmt.Sprintf("%d", channels),
-		"pipe:1",
-	)
-	ffmpeg := exec.Command("ffmpeg", ffmpegArgs...)
-	stdout, err := ffmpeg.StdoutPipe()
-	if err != nil {
-		return nil, nil, errors.Wrap(err, "get ffmpeg stdout pipe")
-	}
-	// make a.. BufferedReadCloser I guess?
-	buf := struct {
-		io.Reader
-		io.Closer
-	}{
-		bufio.NewReaderSize(stdout, frameSize*5),
-		stdout,
-	}
-	err = ffmpeg.Start()
-	if err != nil {
-		return nil, nil, errors.Wrap(err, "start ffmpeg process")
-	}
-	return ffmpeg, buf, nil
-}
-
-func (ms *musicSession) streamToVC(vc *discordgo.VoiceConnection, done chan error) {
-	defer close(done)
-	defer func(stream io.ReadCloser) {
-		err := stream.Close()
-		if err != nil && !errors.Is(err, os.ErrClosed) {
-			ms.logger.Error("Error closing stream: ", err)
-		}
-	}(ms.stream)
-	defer func(Process *os.Process) {
-		err := Process.Kill()
-		if err != nil {
-			ms.logger.Error("Error killing ffmpeg process: ", err)
-		}
-	}(ms.cmd.Process)
-	pcmFrame := make([]float32, frameSize)
-	//buffer := make([]byte, bufferSize)
-	enc, err := opus.NewEncoder(sampleRate, channels, opus.Audio)
-	if err != nil {
-		done <- errors.Wrap(err, "create opus encoder")
-		return
-	}
-	for {
-		ms.Lock()
-		err := binary.Read(ms.stream, binary.BigEndian, pcmFrame)
-		ms.Unlock()
-		if err != nil {
-			if !errors.Is(err, io.EOF) {
-				done <- errors.Wrap(err, "read audio stream")
-			}
-			return
-		}
-		for i := range pcmFrame {
-			pcmFrame[i] *= ms.volume
-		}
-		packet, err := enc.EncodeFloat32(pcmFrame, frameSize, bufferSize)
-		if err != nil {
-			done <- errors.Wrap(err, "encode pcm to opus")
-			return
-		}
-		select {
-		case <-ms.stop:
-			empty(ms.stop)
-			return
-		case vc.OpusSend <- packet:
+	if re, ok := err.(*discordgo.RESTError); ok {
+		if re.Message.Code == discordgo.ErrCodeInteractionHasAlreadyBeenAcknowledged {
+			_, err = s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+				Content: &message,
+			})
 		}
 	}
+	return err
 }
 
 func playSound(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.InteractionCreate, guildID, channelID, url string) error {
@@ -203,39 +65,21 @@ func playSound(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.Int
 		}
 	}(vc)
 
-	//err = vc.Speaking(true)
-	//if err != nil {
-	//	return errors.Wrap(err, "set speaking state")
-	//}
-	//defer func(vc *discordgo.VoiceConnection, b bool) {
-	//	err := vc.Speaking(b)
-	//	if err != nil {
-	//		logger.Error("Error setting speaking state: ", err)
-	//	}
-	//}(vc, false)
+	err = respondAck(s, i)
+	if err != nil {
+		logger.Error("Error responding with ack to play command: ", err)
+	}
 
-	err = respond(s, i, fmt.Sprintf("playing %s", "test"))
+	ms, err := newMusicTrack(logger, url)
+	if err != nil {
+		return errors.Wrap(err, "create music track")
+	}
+	currentms = ms
+
+	err = respond(s, i, fmt.Sprintf("playing %s by %s", ms.videoData.Title, ms.videoData.Channel))
 	if err != nil {
 		logger.Error("Error responding to play command: ", err)
 	}
-
-	streamURL, err := getStreamURL(url)
-	if err != nil {
-		return errors.Wrap(err, "get stream url")
-	}
-	cmd, stream, err := getStream(streamURL, 0)
-	if err != nil {
-		return errors.Wrap(err, "get stream")
-	}
-	ms := musicSession{
-		logger:    logger,
-		cmd:       cmd,
-		stream:    stream,
-		streamURL: streamURL,
-		stop:      make(chan struct{}),
-		volume:    1,
-	}
-	currentms = &ms
 
 	done := make(chan error, 1)
 
@@ -260,13 +104,10 @@ func playHandler(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.I
 	for _, vs := range g.VoiceStates {
 		if vs.UserID == i.Member.User.ID {
 			err = playSound(logger, s, i, g.ID, vs.ChannelID, url)
-			if err != nil {
-				return errors.Wrap(err, "play sound")
-			}
-			break
+			return errors.Wrap(err, "play sound")
 		}
 	}
-	return nil
+	return respond(s, i, "user not in voice channel")
 }
 
 func seekHandler(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.InteractionCreate) error {
