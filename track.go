@@ -24,6 +24,10 @@ const (
 	frameSizeMs = 20
 	frameSize   = channels * frameSizeMs * sampleRate / 1000
 	bufferSize  = frameSize * 4
+
+	smoothVolumeStepPercentPerSecond = 50.
+
+	smoothVolumeStep = smoothVolumeStepPercentPerSecond / 100 / (1000 / frameSizeMs)
 )
 
 type VideoData struct {
@@ -37,12 +41,13 @@ type VideoData struct {
 
 type musicTrack struct {
 	sync.Mutex
-	logger    *zap.SugaredLogger
-	cmd       *exec.Cmd
-	stream    io.ReadCloser
-	stop      chan struct{}
-	volume    float32
-	videoData *VideoData
+	logger       *zap.SugaredLogger
+	cmd          *exec.Cmd
+	stream       io.ReadCloser
+	stop         chan struct{}
+	volume       float32
+	targetVolume float32
+	videoData    *VideoData
 }
 
 var (
@@ -51,25 +56,26 @@ var (
 
 func newMusicTrack(logger *zap.SugaredLogger, url string) (*musicTrack, error) {
 	ms := musicTrack{
-		logger: logger,
-		stop:   make(chan struct{}),
-		volume: 1,
+		logger:       logger,
+		stop:         make(chan struct{}),
+		volume:       1,
+		targetVolume: 1,
 	}
 	err := ms.getStreamURL(url)
 	return &ms, errors.Wrap(err, "get stream url")
 }
 
 func (ms *musicTrack) seek(pos time.Duration) error {
-	oldcmd, oldstream := ms.cmd, ms.stream
+	oldCmd, oldStream := ms.cmd, ms.stream
 	err := ms.getStream(pos)
 	if err != nil {
 		return errors.Wrap(err, "get stream")
 	}
-	err = oldstream.Close()
+	err = oldStream.Close()
 	if err != nil {
 		ms.logger.Error("Error closing old stream: ", err)
 	}
-	err = oldcmd.Process.Signal(syscall.SIGTERM)
+	err = oldCmd.Process.Signal(syscall.SIGTERM)
 	if err != nil {
 		ms.logger.Error("Error killing old ffmpeg: ", err)
 	}
@@ -199,6 +205,10 @@ func (ms *musicTrack) streamToVC(vc *discordgo.VoiceConnection, done chan error)
 			}
 			return
 		}
+		// change volume by at most smoothVolumeStep towards the target volume every frame
+		if ms.volume != ms.targetVolume {
+			ms.volume += atMostAbs(ms.targetVolume-ms.volume, smoothVolumeStep)
+		}
 		for i := range pcmFrame {
 			pcmFrame[i] *= ms.volume
 		}
@@ -214,4 +224,11 @@ func (ms *musicTrack) streamToVC(vc *discordgo.VoiceConnection, done chan error)
 		case vc.OpusSend <- packet:
 		}
 	}
+}
+
+func atMostAbs[T int | float32 | float64](num, clamp T) T {
+	if num < 0 {
+		return max(num, -clamp)
+	}
+	return min(num, clamp)
 }

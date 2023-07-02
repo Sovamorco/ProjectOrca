@@ -132,7 +132,7 @@ func volumeHandler(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo
 	}
 	volume := options[0].Value.(float64)
 	logger.Infof("set volume to %f%%", volume)
-	currentms.volume = float32(volume / 100)
+	currentms.targetVolume = float32(volume / 100)
 	return respond(s, i, fmt.Sprintf("set volume to %.2f%%", volume))
 }
 
