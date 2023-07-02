@@ -39,6 +39,20 @@ type YTDLData struct {
 	HTTPHeaders map[string]string `json:"http_headers"`
 }
 
+type YTDLSearchData struct {
+	YTDLData
+	Entries []YTDLData `json:"entries"`
+}
+
+func (td *YTDLData) toGeneric() *genericTrackData {
+	return &genericTrackData{
+		title:       td.Title,
+		originalURL: td.OriginalURL,
+		url:         td.URL,
+		httpHeaders: td.HTTPHeaders,
+	}
+}
+
 type genericTrackData struct {
 	title       string
 	originalURL string
@@ -62,14 +76,18 @@ var (
 )
 
 func newMusicTrack(logger *zap.SugaredLogger, url string) (*musicTrack, error) {
-	ms := musicTrack{
+	ms := newMusicTrackEmpty(logger)
+	err := ms.getStreamURL(url)
+	return ms, errors.Wrap(err, "get stream url")
+}
+
+func newMusicTrackEmpty(logger *zap.SugaredLogger) *musicTrack {
+	return &musicTrack{
 		logger:       logger,
 		stop:         make(chan struct{}),
 		volume:       1,
 		targetVolume: 1,
 	}
-	err := ms.getStreamURL(url)
-	return &ms, errors.Wrap(err, "get stream url")
 }
 
 func (ms *musicTrack) seek(pos time.Duration) error {
@@ -89,7 +107,7 @@ func (ms *musicTrack) seek(pos time.Duration) error {
 	return nil
 }
 
-func (ms *musicTrack) getStreamURL(url string) error {
+func getYTDLPOutput(logger *zap.SugaredLogger, url string) ([]byte, error) {
 	ytdlpArgs := []string{
 		"--format-sort-force",
 		"--format-sort", "+hasvid,proto,asr~48000,acodec:opus",
@@ -98,34 +116,46 @@ func (ms *musicTrack) getStreamURL(url string) error {
 		url,
 	}
 	ytdlp := exec.Command("yt-dlp", ytdlpArgs...)
-	ms.logger.Debug(ytdlp)
+	logger.Debug(ytdlp)
 	stdout, err := ytdlp.StdoutPipe()
 	if err != nil {
-		return errors.Wrap(err, "get ytdlp stdout pipe")
+		return nil, errors.Wrap(err, "get ytdlp stdout pipe")
 	}
 	err = ytdlp.Start()
 	if err != nil {
-		return errors.Wrap(err, "start ytdlp")
+		return nil, errors.Wrap(err, "start ytdlp")
 	}
 	jsonB, err := io.ReadAll(stdout)
 	if err != nil {
-		return errors.Wrap(err, "read stream url")
+		return nil, errors.Wrap(err, "read stream url")
 	}
 	err = ytdlp.Wait()
 	if err != nil {
-		return errors.Wrap(err, "wait for ytdlp")
+		return nil, errors.Wrap(err, "wait for ytdlp")
 	}
-	vd := YTDLData{}
+	return jsonB, nil
+}
+
+func (ms *musicTrack) getStreamURL(url string) error {
+	jsonB, err := getYTDLPOutput(ms.logger, url)
+	if err != nil {
+		return errors.Wrap(err, "get ytdlp output")
+	}
+	var ad YTDLData
+	vd := YTDLSearchData{}
 	err = json.Unmarshal(jsonB, &vd)
 	if err != nil {
-		return errors.Wrap(err, "unmarshal video data json")
+		return errors.Wrap(err, "unmarshal ytdl output")
 	}
-	ms.trackData = &genericTrackData{
-		title:       vd.Title,
-		originalURL: vd.OriginalURL,
-		url:         vd.URL,
-		httpHeaders: vd.HTTPHeaders,
+	if vd.Entries == nil {
+		ad = vd.YTDLData
+	} else {
+		if len(vd.Entries) < 1 {
+			return errors.New("no search results")
+		}
+		ad = vd.Entries[0]
 	}
+	ms.trackData = ad.toGeneric()
 	return nil
 }
 
@@ -237,11 +267,4 @@ func (ms *musicTrack) streamToVC(vc *discordgo.VoiceConnection, done chan error)
 		case vc.OpusSend <- packet:
 		}
 	}
-}
-
-func atMostAbs[T int | float32 | float64](num, clamp T) T {
-	if num < 0 {
-		return max(num, -clamp)
-	}
-	return min(num, clamp)
 }

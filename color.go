@@ -1,5 +1,9 @@
 package main
 
+import (
+	"strings"
+)
+
 type Color int
 
 //goland:noinspection GoUnusedConst
@@ -32,4 +36,28 @@ const (
 	ColorDarkTheme   Color = 0x36393F
 	ColorFuchsia     Color = 0xEB459E
 	ColorYellow      Color = 0xFEE75C
+
+	DefaultColor = ColorDarkPurple
 )
+
+var embedColors = map[string]Color{
+	"youtube.com":      ColorRed,
+	"youtu.be":         ColorRed,
+	"open.spotify.com": ColorGreen,
+	"soundcloud.com":   ColorOrange,
+	"twitch.tv":        ColorPurple,
+	"bandcamp.com":     ColorBlue,
+	"vk.com":           ColorBlue,
+	"vimeo.com":        ColorDarkBlue,
+}
+
+func getEmbedColor(query string) Color {
+	if urlRx.MatchString(query) {
+		for service, color := range embedColors {
+			if strings.Contains(query, service) {
+				return color
+			}
+		}
+	}
+	return DefaultColor
+}

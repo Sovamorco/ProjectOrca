@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"reflect"
 	"syscall"
 	"time"
 )
@@ -22,65 +23,6 @@ func empty[T any](c chan T) {
 		default:
 		}
 	}
-}
-
-func respondAck(s *discordgo.Session, i *discordgo.InteractionCreate) error {
-	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
-	})
-	if re, ok := err.(*discordgo.RESTError); ok {
-		if re.Message.Code == discordgo.ErrCodeInteractionHasAlreadyBeenAcknowledged {
-			err = nil
-		}
-	}
-	return err
-}
-
-func respondSimpleMessage(s *discordgo.Session, i *discordgo.InteractionCreate, message string) error {
-	return respond(s, i, &discordgo.InteractionResponseData{
-		Content: message,
-	})
-}
-
-func respondColoredEmbed(s *discordgo.Session, i *discordgo.InteractionCreate, color Color, name, message string) error {
-	embed := discordgo.MessageEmbed{
-		Color: int(color),
-		Fields: []*discordgo.MessageEmbedField{
-			{
-				Name:   name,
-				Value:  message,
-				Inline: false,
-			},
-		},
-	}
-	return respond(s, i, &discordgo.InteractionResponseData{
-		Embeds: []*discordgo.MessageEmbed{
-			&embed,
-		},
-	})
-}
-
-func respondSimpleEmbed(s *discordgo.Session, i *discordgo.InteractionCreate, name, message string) error {
-	return respondColoredEmbed(s, i, ColorDarkPurple, name, message)
-}
-
-func respond(s *discordgo.Session, i *discordgo.InteractionCreate, response *discordgo.InteractionResponseData) error {
-	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: response,
-	})
-	if re, ok := err.(*discordgo.RESTError); ok {
-		if re.Message.Code == discordgo.ErrCodeInteractionHasAlreadyBeenAcknowledged {
-			_, err = s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-				Content:         &response.Content,
-				Components:      &response.Components,
-				Embeds:          &response.Embeds,
-				Files:           response.Files,
-				AllowedMentions: response.AllowedMentions,
-			})
-		}
-	}
-	return err
 }
 
 func playSound(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.InteractionCreate, guildID, channelID, url string) error {
@@ -100,13 +42,20 @@ func playSound(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.Int
 		logger.Error("Error responding with ack to play command: ", err)
 	}
 
-	ms, err := newMusicTrack(logger, url)
+	var ms *musicTrack
+
+	if !urlRx.MatchString(url) {
+		url = "ytsearch:" + url
+	}
+
+	ms, err = newMusicTrack(logger, url)
 	if err != nil {
 		return errors.Wrap(err, "create music track")
 	}
 	currentms = ms
 
-	err = respondSimpleEmbed(s, i, "Added track", fmt.Sprintf("[%s](%s)", ms.trackData.title, ms.trackData.originalURL))
+	color := getEmbedColor(ms.trackData.originalURL)
+	err = respondColoredEmbed(s, i, color, "Added track", fmt.Sprintf("[%s](%s)", ms.trackData.title, ms.trackData.originalURL))
 	if err != nil {
 		logger.Error("Error responding to play command: ", err)
 	}
@@ -242,14 +191,23 @@ func readyHandlerWrapper(logger *zap.SugaredLogger) func(s *discordgo.Session, _
 	}
 }
 
+func interactionApplicationCommandHandler(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.InteractionCreate) {
+	name := i.ApplicationCommandData().Name
+	if handler, ok := commandHandlers[name]; ok {
+		err := handler(logger, s, i)
+		if err != nil {
+			logger.Errorf("Error handling \"%s\" interaction: %v", name, err)
+		}
+	}
+}
+
 func interactionCreateHandlerWrapper(logger *zap.SugaredLogger) func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	return func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-		name := i.ApplicationCommandData().Name
-		if handler, ok := commandHandlers[name]; ok {
-			err := handler(logger, s, i)
-			if err != nil {
-				logger.Errorf("Error handling \"%s\" interaction: %v", name, err)
-			}
+		switch i.Type {
+		case discordgo.InteractionApplicationCommand:
+			interactionApplicationCommandHandler(logger, s, i)
+		default:
+			logger.Errorf("Unknown interaction type: %s (%s)", i.Type.String(), reflect.TypeOf(i.Data).Name())
 		}
 	}
 }
