@@ -142,6 +142,7 @@ func stopHandler(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.I
 	return respond(s, i, "stopped")
 }
 
+var minVolume = 0.1
 var commands = []*discordgo.ApplicationCommand{
 	{
 		Name:        "test",
@@ -180,6 +181,8 @@ var commands = []*discordgo.ApplicationCommand{
 				Description: "volume in percent to scale to",
 				Type:        discordgo.ApplicationCommandOptionNumber,
 				Required:    true,
+				MaxValue:    100,
+				MinValue:    &minVolume,
 			},
 		},
 	},

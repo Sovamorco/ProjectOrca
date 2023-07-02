@@ -140,6 +140,7 @@ func (ms *musicTrack) getStream(pos time.Duration) error {
 	}
 	ffmpegArgs = append(ffmpegArgs,
 		"-i", ms.videoData.URL,
+		"-filter:a", "loudnorm",
 		"-f", "f32be",
 		"-ar", fmt.Sprintf("%d", sampleRate),
 		"-ac", fmt.Sprintf("%d", channels),
