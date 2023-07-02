@@ -153,6 +153,10 @@ func (ms *musicTrack) getStream(pos time.Duration) error {
 		bufio.NewReaderSize(stdout, frameSize*5),
 		stdout,
 	}
+	err = ffmpeg.Start()
+	if err != nil {
+		return errors.Wrap(err, "start ffmpeg process")
+	}
 	ms.Lock()
 	ms.cmd = ffmpeg
 	ms.stream = buf
@@ -186,7 +190,6 @@ func (ms *musicTrack) streamToVC(vc *discordgo.VoiceConnection, done chan error)
 		return
 	}
 	for {
-		ms.logger.Debug(pcmFrame)
 		ms.Lock()
 		err = binary.Read(ms.stream, binary.BigEndian, pcmFrame)
 		ms.Unlock()
