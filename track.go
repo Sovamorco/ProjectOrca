@@ -71,10 +71,6 @@ type musicTrack struct {
 	trackData    *genericTrackData
 }
 
-var (
-	currentms *musicTrack
-)
-
 func newMusicTrack(logger *zap.SugaredLogger, url string) (*musicTrack, error) {
 	ms := newMusicTrackEmpty(logger)
 	err := ms.getStreamURL(url)

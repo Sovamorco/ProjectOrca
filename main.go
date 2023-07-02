@@ -26,18 +26,7 @@ func empty[T any](c chan T) {
 }
 
 func playSound(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.InteractionCreate, guildID, channelID, url string) error {
-	vc, err := s.ChannelVoiceJoin(guildID, channelID, false, true)
-	if err != nil {
-		return errors.Wrap(err, "join voice channel")
-	}
-	defer func(vc *discordgo.VoiceConnection) {
-		err := vc.Disconnect()
-		if err != nil {
-			logger.Error("Error leaving voice channel: ", err)
-		}
-	}(vc)
-
-	err = respondAck(s, i)
+	err := respondAck(s, i)
 	if err != nil {
 		logger.Error("Error responding with ack to play command: ", err)
 	}
@@ -52,7 +41,6 @@ func playSound(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.Int
 	if err != nil {
 		return errors.Wrap(err, "create music track")
 	}
-	currentms = ms
 
 	color := getEmbedColor(ms.trackData.originalURL)
 	err = respondColoredEmbed(s, i, color, "Added track", fmt.Sprintf("[%s](%s)", ms.trackData.title, ms.trackData.originalURL))
@@ -60,12 +48,12 @@ func playSound(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.Int
 		logger.Error("Error responding to play command: ", err)
 	}
 
-	done := make(chan error, 1)
+	if currentQueue == nil {
+		currentQueue = newQueue(logger, s, guildID, channelID)
+	}
 
-	go ms.streamToVC(vc, done)
-
-	err = <-done
-	return errors.Wrap(err, "stream to vc")
+	currentQueue.add(ms)
+	return errors.Wrap(err, "add track to queue")
 }
 
 func playHandler(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.InteractionCreate) error {
@@ -97,7 +85,7 @@ func seekHandler(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.I
 	tcF := options[0].Value.(float64)
 	tc := time.Duration(tcF)
 	logger.Infof("seek to %ds", tc)
-	err := currentms.seek(time.Second * tc)
+	err := currentQueue.tracks[0].seek(time.Second * tc)
 	if err != nil {
 		return errors.Wrap(err, "seek")
 	}
@@ -111,13 +99,13 @@ func volumeHandler(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo
 	}
 	volume := options[0].Value.(float64)
 	logger.Infof("set volume to %f%%", volume)
-	currentms.targetVolume = float32(volume / 100)
+	currentQueue.tracks[0].targetVolume = float32(volume / 100)
 	return respondSimpleMessage(s, i, fmt.Sprintf("set volume to %.2f%%", volume))
 }
 
 func stopHandler(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.InteractionCreate) error {
 	logger.Info("Stop current track")
-	currentms.stop <- struct{}{}
+	currentQueue.tracks[0].stop <- struct{}{}
 	return respondSimpleMessage(s, i, "stopped")
 }
 
