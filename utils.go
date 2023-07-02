@@ -14,8 +14,8 @@ func atMostAbs[T int | float32 | float64](num, clamp T) T {
 	return min(num, clamp)
 }
 
-func respondAck(s *discordgo.Session, i *discordgo.InteractionCreate) error {
-	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+func (s *State) respondAck(i *discordgo.InteractionCreate) error {
+	err := s.Session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
 	})
 	if re, ok := err.(*discordgo.RESTError); ok {
@@ -26,13 +26,13 @@ func respondAck(s *discordgo.Session, i *discordgo.InteractionCreate) error {
 	return err
 }
 
-func respondSimpleMessage(s *discordgo.Session, i *discordgo.InteractionCreate, message string) error {
-	return respond(s, i, &discordgo.InteractionResponseData{
+func (s *State) respondSimpleMessage(i *discordgo.InteractionCreate, message string) error {
+	return s.respond(i, &discordgo.InteractionResponseData{
 		Content: message,
 	})
 }
 
-func respondColoredEmbed(s *discordgo.Session, i *discordgo.InteractionCreate, color Color, name, message string) error {
+func (s *State) respondColoredEmbed(i *discordgo.InteractionCreate, color Color, name, message string) error {
 	embed := discordgo.MessageEmbed{
 		Color: int(color),
 		Fields: []*discordgo.MessageEmbedField{
@@ -43,25 +43,25 @@ func respondColoredEmbed(s *discordgo.Session, i *discordgo.InteractionCreate, c
 			},
 		},
 	}
-	return respond(s, i, &discordgo.InteractionResponseData{
+	return s.respond(i, &discordgo.InteractionResponseData{
 		Embeds: []*discordgo.MessageEmbed{
 			&embed,
 		},
 	})
 }
 
-func respondSimpleEmbed(s *discordgo.Session, i *discordgo.InteractionCreate, name, message string) error {
-	return respondColoredEmbed(s, i, DefaultColor, name, message)
+func (s *State) respondSimpleEmbed(i *discordgo.InteractionCreate, name, message string) error {
+	return s.respondColoredEmbed(i, DefaultColor, name, message)
 }
 
-func respond(s *discordgo.Session, i *discordgo.InteractionCreate, response *discordgo.InteractionResponseData) error {
-	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+func (s *State) respond(i *discordgo.InteractionCreate, response *discordgo.InteractionResponseData) error {
+	err := s.Session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: response,
 	})
 	if re, ok := err.(*discordgo.RESTError); ok {
 		if re.Message.Code == discordgo.ErrCodeInteractionHasAlreadyBeenAcknowledged {
-			_, err = s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+			_, err = s.Session.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
 				Content:         &response.Content,
 				Components:      &response.Components,
 				Embeds:          &response.Embeds,
@@ -71,4 +71,13 @@ func respond(s *discordgo.Session, i *discordgo.InteractionCreate, response *dis
 		}
 	}
 	return err
+}
+
+func empty[T any](c chan T) {
+	for len(c) != 0 {
+		select {
+		case <-c:
+		default:
+		}
+	}
 }
