@@ -36,17 +36,47 @@ func respondAck(s *discordgo.Session, i *discordgo.InteractionCreate) error {
 	return err
 }
 
-func respond(s *discordgo.Session, i *discordgo.InteractionCreate, message string) error {
+func respondSimpleMessage(s *discordgo.Session, i *discordgo.InteractionCreate, message string) error {
+	return respond(s, i, &discordgo.InteractionResponseData{
+		Content: message,
+	})
+}
+
+func respondColoredEmbed(s *discordgo.Session, i *discordgo.InteractionCreate, color Color, name, message string) error {
+	embed := discordgo.MessageEmbed{
+		Color: int(color),
+		Fields: []*discordgo.MessageEmbedField{
+			{
+				Name:   name,
+				Value:  message,
+				Inline: false,
+			},
+		},
+	}
+	return respond(s, i, &discordgo.InteractionResponseData{
+		Embeds: []*discordgo.MessageEmbed{
+			&embed,
+		},
+	})
+}
+
+func respondSimpleEmbed(s *discordgo.Session, i *discordgo.InteractionCreate, name, message string) error {
+	return respondColoredEmbed(s, i, ColorDarkPurple, name, message)
+}
+
+func respond(s *discordgo.Session, i *discordgo.InteractionCreate, response *discordgo.InteractionResponseData) error {
 	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Content: message,
-		},
+		Data: response,
 	})
 	if re, ok := err.(*discordgo.RESTError); ok {
 		if re.Message.Code == discordgo.ErrCodeInteractionHasAlreadyBeenAcknowledged {
 			_, err = s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-				Content: &message,
+				Content:         &response.Content,
+				Components:      &response.Components,
+				Embeds:          &response.Embeds,
+				Files:           response.Files,
+				AllowedMentions: response.AllowedMentions,
 			})
 		}
 	}
@@ -76,7 +106,7 @@ func playSound(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.Int
 	}
 	currentms = ms
 
-	err = respond(s, i, fmt.Sprintf("playing %s by %s", ms.videoData.Title, ms.videoData.Channel))
+	err = respondSimpleEmbed(s, i, "Added track", fmt.Sprintf("[%s](%s)", ms.trackData.title, ms.trackData.originalURL))
 	if err != nil {
 		logger.Error("Error responding to play command: ", err)
 	}
@@ -107,7 +137,7 @@ func playHandler(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.I
 			return errors.Wrap(err, "play sound")
 		}
 	}
-	return respond(s, i, "user not in voice channel")
+	return respondSimpleMessage(s, i, "user not in voice channel")
 }
 
 func seekHandler(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.InteractionCreate) error {
@@ -122,7 +152,7 @@ func seekHandler(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.I
 	if err != nil {
 		return errors.Wrap(err, "seek")
 	}
-	return respond(s, i, fmt.Sprintf("seek to %ds", tc))
+	return respondSimpleMessage(s, i, fmt.Sprintf("seek to %ds", tc))
 }
 
 func volumeHandler(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.InteractionCreate) error {
@@ -133,13 +163,13 @@ func volumeHandler(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo
 	volume := options[0].Value.(float64)
 	logger.Infof("set volume to %f%%", volume)
 	currentms.targetVolume = float32(volume / 100)
-	return respond(s, i, fmt.Sprintf("set volume to %.2f%%", volume))
+	return respondSimpleMessage(s, i, fmt.Sprintf("set volume to %.2f%%", volume))
 }
 
 func stopHandler(logger *zap.SugaredLogger, s *discordgo.Session, i *discordgo.InteractionCreate) error {
 	logger.Info("Stop current track")
 	currentms.stop <- struct{}{}
-	return respond(s, i, "stopped")
+	return respondSimpleMessage(s, i, "stopped")
 }
 
 var minVolume = 0.1
@@ -194,7 +224,7 @@ var commands = []*discordgo.ApplicationCommand{
 
 var commandHandlers = map[string]CommandHandler{
 	"test": func(_ *zap.SugaredLogger, s *discordgo.Session, i *discordgo.InteractionCreate) error {
-		return respond(s, i, "test command pog")
+		return respondSimpleMessage(s, i, "test command pog")
 	},
 	"play":   playHandler,
 	"seek":   seekHandler,

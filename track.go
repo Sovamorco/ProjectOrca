@@ -30,13 +30,20 @@ const (
 	smoothVolumeStep = smoothVolumeStepPercentPerSecond / 100 / (1000 / frameSizeMs)
 )
 
-type VideoData struct {
+type YTDLData struct {
 	Id          string            `json:"id"`
 	Title       string            `json:"title"`
 	Channel     string            `json:"channel"`
 	OriginalURL string            `json:"original_url"`
 	URL         string            `json:"url"`
 	HTTPHeaders map[string]string `json:"http_headers"`
+}
+
+type genericTrackData struct {
+	title       string
+	originalURL string
+	url         string
+	httpHeaders map[string]string
 }
 
 type musicTrack struct {
@@ -47,7 +54,7 @@ type musicTrack struct {
 	stop         chan struct{}
 	volume       float32
 	targetVolume float32
-	videoData    *VideoData
+	trackData    *genericTrackData
 }
 
 var (
@@ -108,18 +115,23 @@ func (ms *musicTrack) getStreamURL(url string) error {
 	if err != nil {
 		return errors.Wrap(err, "wait for ytdlp")
 	}
-	vd := VideoData{}
+	vd := YTDLData{}
 	err = json.Unmarshal(jsonB, &vd)
 	if err != nil {
 		return errors.Wrap(err, "unmarshal video data json")
 	}
-	ms.videoData = &vd
+	ms.trackData = &genericTrackData{
+		title:       vd.Title,
+		originalURL: vd.OriginalURL,
+		url:         vd.URL,
+		httpHeaders: vd.HTTPHeaders,
+	}
 	return nil
 }
 
 func (ms *musicTrack) getFormattedHeaders() string {
-	fmtd := make([]string, len(ms.videoData.HTTPHeaders))
-	for k, v := range ms.videoData.HTTPHeaders {
+	fmtd := make([]string, len(ms.trackData.httpHeaders))
+	for k, v := range ms.trackData.httpHeaders {
 		fmtd = append(fmtd, fmt.Sprintf("%s:%s", k, v))
 	}
 	return strings.Join(fmtd, "\r\n")
@@ -132,14 +144,14 @@ func (ms *musicTrack) getStream(pos time.Duration) error {
 		"-reconnect_streamed", "1",
 		"-reconnect_delay_max", "2",
 	}
-	if !strings.Contains(ms.videoData.URL, ".m3u8") {
+	if !strings.Contains(ms.trackData.url, ".m3u8") {
 		ffmpegArgs = append(ffmpegArgs,
 			"-reconnect_at_eof", "1",
 			"-ss", fmt.Sprintf("%f", pos.Seconds()),
 		)
 	}
 	ffmpegArgs = append(ffmpegArgs,
-		"-i", ms.videoData.URL,
+		"-i", ms.trackData.url,
 		"-filter:a", "loudnorm",
 		"-f", "f32be",
 		"-ar", fmt.Sprintf("%d", sampleRate),
