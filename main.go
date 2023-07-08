@@ -1,59 +1,43 @@
 package main
 
 import (
+	pb "ProjectOrca/proto"
+	"context"
+	"fmt"
 	"github.com/bwmarrin/discordgo"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"google.golang.org/grpc"
 	"io"
+	"net"
 	"os"
 	"os/signal"
 	"syscall"
 )
 
-var minVolume = 0.1
-var commands = []*discordgo.ApplicationCommand{
-	{
-		Name:        "play",
-		Description: "play music",
-		Options: []*discordgo.ApplicationCommandOption{
-			{
-				Name:        "url",
-				Description: "URL of whatever to play",
-				Type:        discordgo.ApplicationCommandOptionString,
-				Required:    true,
-			},
-		},
-	},
-	{
-		Name:        "seek",
-		Description: "seek current track",
-		Options: []*discordgo.ApplicationCommandOption{
-			{
-				Name:        "time",
-				Description: "time to seek to",
-				Type:        discordgo.ApplicationCommandOptionInteger,
-				Required:    true,
-			},
-		},
-	},
-	{
-		Name:        "volume",
-		Description: "change volume",
-		Options: []*discordgo.ApplicationCommandOption{
-			{
-				Name:        "volume",
-				Description: "volume in percent to scale to",
-				Type:        discordgo.ApplicationCommandOptionNumber,
-				Required:    true,
-				MaxValue:    100,
-				MinValue:    &minVolume,
-			},
-		},
-	},
-	{
-		Name:        "stop",
-		Description: "stop current track",
-	},
+func newOrcaServer(logger *zap.SugaredLogger, session *discordgo.Session) *orcaServer {
+	return &orcaServer{
+		state: newState(logger, session),
+	}
+}
+
+type orcaServer struct {
+	pb.UnimplementedOrcaServer
+	state *State
+}
+
+func (o *orcaServer) Play(ctx context.Context, in *pb.PlayRequest) (*pb.PlayReply, error) {
+	gs, ok := o.state.Guilds[in.GuildID]
+	if !ok {
+		gs = o.state.newGuildState(in.GuildID)
+	}
+	trackData, err := gs.playSound(in.ChannelID, in.Url)
+	if err != nil {
+		return nil, err
+	}
+	return &pb.PlayReply{
+		Track: trackData,
+	}, nil
 }
 
 func main() {
@@ -62,31 +46,35 @@ func main() {
 		panic(err)
 	}
 	logger := coreLogger.Sugar()
+	err = run(logger)
+	if err != nil {
+		logger.Fatal(err)
+	}
+}
 
+func run(logger *zap.SugaredLogger) error {
 	// temporary
 	tf, err := os.Open(".token")
 	if err != nil {
-		panic(err)
+		return err
 	}
 	token, err := io.ReadAll(tf)
 	if err != nil {
-		panic(err)
+		return err
 	}
 
 	rcb, err := discordgo.New("Bot " + string(token))
 	if err != nil {
-		panic(err)
+		return err
 	}
 
 	state := newState(logger, rcb)
+	logger.Info(state)
 
-	rcb.AddHandler(state.readyHandlerWrapper())
-	rcb.AddHandler(state.interactionCreateHandlerWrapper())
-
-	rcb.Identify.Intents = discordgo.IntentsGuilds | discordgo.IntentsGuildMessages | discordgo.IntentsGuildVoiceStates
+	rcb.Identify.Intents = discordgo.IntentGuildVoiceStates
 	err = rcb.Open()
 	if err != nil {
-		panic(err)
+		return err
 	}
 
 	defer func() {
@@ -96,40 +84,35 @@ func main() {
 		}
 	}()
 
-	registeredCommands, err := rcb.ApplicationCommands(rcb.State.User.ID, "")
-	if err != nil {
-		panic(err)
-	}
-	registeredCommandsMap := make(map[string]*discordgo.ApplicationCommand, len(registeredCommands))
-	for _, registeredCommand := range registeredCommands {
-		registeredCommandsMap[registeredCommand.Name] = registeredCommand
-	}
+	logger.Infof("Started the bot")
 
-	for _, v := range commands {
-		_, err = rcb.ApplicationCommandCreate(rcb.State.User.ID, "", v)
-		if err != nil {
-			panic(err)
-		}
-		if _, ok := registeredCommandsMap[v.Name]; ok {
-			delete(registeredCommandsMap, v.Name)
-		} else {
-			logger.Info("Adding new command: ", v.Name)
-		}
-	}
-	for name, oldCommand := range registeredCommandsMap {
-		logger.Info("Removing old command: ", name)
-		err = rcb.ApplicationCommandDelete(rcb.State.User.ID, "", oldCommand.ID)
-		if err != nil {
-			panic(err)
-		}
-	}
-
-	registeredCommands, err = rcb.ApplicationCommands(rcb.State.User.ID, "")
+	port := 8590
+	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
-		panic(err)
+		return err
 	}
-	logger.Infof("Started the bot with %d registered commands", len(registeredCommands))
+	grpcServer := grpc.NewServer()
+	orca := newOrcaServer(logger, rcb)
+	pb.RegisterOrcaServer(grpcServer, orca)
+
+	serverErrors := make(chan error, 1)
+	go func() {
+		serverErrors <- grpcServer.Serve(lis)
+	}()
+	defer func() {
+		grpcServer.GracefulStop()
+	}()
+
+	logger.Infof("Started gRPC server on port %d", port)
+
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
-	<-sc
+	select {
+	case err = <-serverErrors:
+		logger.Error("Error listening for gRPC calls: ", err)
+		return err
+	case sig := <-sc:
+		logger.Infof("Exiting with signal %v", sig)
+		return nil
+	}
 }

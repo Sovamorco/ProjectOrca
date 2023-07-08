@@ -28,9 +28,11 @@ func (q *Queue) add(ms *MusicTrack) {
 }
 
 func (q *Queue) start() {
-	vc, err := q.Session.ChannelVoiceJoin(q.GuildState.Guild.ID, q.channelID, false, true)
+	q.Logger.Info("Starting playback")
+	vc, err := q.Session.ChannelVoiceJoin(q.GuildState.GuildID, q.channelID, false, true)
 	if err != nil {
 		q.Logger.Error("Error joining voice channel: ", err)
+		return
 	}
 	q.vc = vc
 	defer func(vc *discordgo.VoiceConnection) {

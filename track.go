@@ -1,7 +1,8 @@
 package main
 
 import (
-	"RaccoonBotMusic/opus"
+	"ProjectOrca/opus"
+	pb "ProjectOrca/proto"
 	"bufio"
 	"encoding/binary"
 	"encoding/json"
@@ -44,20 +45,13 @@ type YTDLSearchData struct {
 	Entries []YTDLData `json:"entries"`
 }
 
-func (td *YTDLData) toGeneric() *GenericTrackData {
-	return &GenericTrackData{
-		title:       td.Title,
-		originalURL: td.OriginalURL,
-		url:         td.URL,
-		httpHeaders: td.HTTPHeaders,
+func (td *YTDLData) toProto() *pb.TrackData {
+	return &pb.TrackData{
+		Title:       td.Title,
+		OriginalURL: td.OriginalURL,
+		Url:         td.URL,
+		HttpHeaders: td.HTTPHeaders,
 	}
-}
-
-type GenericTrackData struct {
-	title       string
-	originalURL string
-	url         string
-	httpHeaders map[string]string
 }
 
 type MusicTrack struct {
@@ -66,7 +60,7 @@ type MusicTrack struct {
 	CMD       *exec.Cmd
 	Stream    io.ReadCloser
 	Stop      chan struct{}
-	TrackData *GenericTrackData
+	TrackData *pb.TrackData
 }
 
 func (q *Queue) newMusicTrack(url string) (*MusicTrack, error) {
@@ -147,13 +141,13 @@ func (ms *MusicTrack) getStreamURL(url string) error {
 		}
 		ad = vd.Entries[0]
 	}
-	ms.TrackData = ad.toGeneric()
+	ms.TrackData = ad.toProto()
 	return nil
 }
 
 func (ms *MusicTrack) getFormattedHeaders() string {
-	fmtd := make([]string, len(ms.TrackData.httpHeaders))
-	for k, v := range ms.TrackData.httpHeaders {
+	fmtd := make([]string, len(ms.TrackData.HttpHeaders))
+	for k, v := range ms.TrackData.HttpHeaders {
 		fmtd = append(fmtd, fmt.Sprintf("%s:%s", k, v))
 	}
 	return strings.Join(fmtd, "\r\n")
@@ -166,14 +160,14 @@ func (ms *MusicTrack) getStream(pos time.Duration) error {
 		"-reconnect_streamed", "1",
 		"-reconnect_delay_max", "2",
 	}
-	if !strings.Contains(ms.TrackData.url, ".m3u8") {
+	if !strings.Contains(ms.TrackData.Url, ".m3u8") {
 		ffmpegArgs = append(ffmpegArgs,
 			"-reconnect_at_eof", "1",
 			"-ss", fmt.Sprintf("%f", pos.Seconds()),
 		)
 	}
 	ffmpegArgs = append(ffmpegArgs,
-		"-i", ms.TrackData.url,
+		"-i", ms.TrackData.Url,
 		"-filter:a", "loudnorm",
 		"-f", "f32be",
 		"-ar", fmt.Sprintf("%d", sampleRate),

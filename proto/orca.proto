@@ -1,0 +1,24 @@
+syntax = "proto3";
+package orca;
+option go_package = "ProjectOrca/proto/orca";
+
+service Orca {
+  rpc Play (PlayRequest) returns (PlayReply) {}
+}
+
+message PlayRequest {
+  string guildID = 1;
+  string channelID = 2;
+  string url = 3;
+}
+
+message PlayReply {
+  TrackData track = 1;
+}
+
+message TrackData {
+  string title = 1;
+  string originalURL = 2;
+  string url = 3;
+  map<string, string> httpHeaders = 4;
+}
