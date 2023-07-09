@@ -8,7 +8,9 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc"
-	"io"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 	"net"
 	"os"
 	"os/signal"
@@ -16,26 +18,74 @@ import (
 	"time"
 )
 
-func newOrcaServer(logger *zap.SugaredLogger, session *discordgo.Session) *orcaServer {
-	stateLogger := logger.With("label", "state")
+func newOrcaServer(logger *zap.SugaredLogger) *orcaServer {
 	serverLogger := logger.With("label", "server")
 	return &orcaServer{
-		state:  newState(stateLogger, session),
+		states: make(map[string]*BotState),
 		logger: serverLogger,
 	}
 }
 
 type orcaServer struct {
 	pb.UnimplementedOrcaServer
-	state  *State
+	states map[string]*BotState
 	logger *zap.SugaredLogger
 }
 
-func (o *orcaServer) Play(_ context.Context, in *pb.PlayRequest) (*pb.PlayReply, error) {
-	o.logger.Infof("Playing \"%s\" in channel %s guild %s", in.Url, in.ChannelID, in.GuildID)
-	gs, ok := o.state.Guilds[in.GuildID]
+func (o *orcaServer) gracefulShutdown() {
+	for _, state := range o.states {
+		state.gracefulShutdown()
+	}
+}
+
+func (o *orcaServer) authInterceptor(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp any, err error) {
+	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		gs = o.state.newGuildState(in.GuildID)
+		return nil, status.Error(codes.Unauthenticated, "missing metadata")
+	}
+	tokenS := md.Get("token")
+	if len(tokenS) != 1 {
+		return nil, status.Error(codes.Unauthenticated, "missing token")
+	}
+	token := tokenS[0]
+	if _, ok := req.(*pb.RegisterRequest); token == "" && ok {
+		return handler(ctx, req)
+	}
+	state, ok := o.states[token]
+	if !ok {
+		return nil, status.Error(codes.Unauthenticated, "not registered")
+	}
+	return handler(context.WithValue(ctx, "state", state), req)
+}
+
+func (o *orcaServer) Register(_ context.Context, in *pb.RegisterRequest) (*pb.RegisterReply, error) {
+	newToken, err := generateSecureToken()
+	if err != nil {
+		return nil, err
+	}
+	session, err := discordgo.New(in.Token)
+	if err != nil {
+		return nil, err
+	}
+	session.Identify.Intents = discordgo.IntentGuildVoiceStates
+	err = session.Open()
+	if err != nil {
+		return nil, err
+	}
+	stateLogger := o.logger.With("label", "state", "botID", session.State.Ready.User.ID)
+	stateLogger.Infof("Started the bot")
+	o.states[newToken] = newState(stateLogger, session)
+	return &pb.RegisterReply{
+		Token: newToken,
+	}, nil
+}
+
+func (o *orcaServer) Play(ctx context.Context, in *pb.PlayRequest) (*pb.PlayReply, error) {
+	state := ctx.Value("state").(*BotState)
+	o.logger.Infof("Playing \"%s\" in channel %s guild %s", in.Url, in.ChannelID, in.GuildID)
+	gs, ok := state.Guilds[in.GuildID]
+	if !ok {
+		gs = state.newGuildState(in.GuildID)
 	}
 	trackData, err := gs.playSound(in.ChannelID, in.Url)
 	if err != nil {
@@ -46,11 +96,12 @@ func (o *orcaServer) Play(_ context.Context, in *pb.PlayRequest) (*pb.PlayReply,
 	}, nil
 }
 
-func (o *orcaServer) Stop(_ context.Context, in *pb.StopRequest) (*pb.StopReply, error) {
+func (o *orcaServer) Stop(ctx context.Context, in *pb.StopRequest) (*pb.StopReply, error) {
+	state := ctx.Value("state").(*BotState)
 	o.logger.Infof("Stopping playback in guild %s", in.GuildID)
-	gs, ok := o.state.Guilds[in.GuildID]
+	gs, ok := state.Guilds[in.GuildID]
 	if !ok {
-		gs = o.state.newGuildState(in.GuildID)
+		gs = state.newGuildState(in.GuildID)
 	}
 	err := gs.stop()
 	if err != nil {
@@ -59,11 +110,12 @@ func (o *orcaServer) Stop(_ context.Context, in *pb.StopRequest) (*pb.StopReply,
 	return &pb.StopReply{}, nil
 }
 
-func (o *orcaServer) Seek(_ context.Context, in *pb.SeekRequest) (*pb.SeekReply, error) {
+func (o *orcaServer) Seek(ctx context.Context, in *pb.SeekRequest) (*pb.SeekReply, error) {
+	state := ctx.Value("state").(*BotState)
 	o.logger.Infof("Seeking to %.2fs in guild %s", in.Position, in.GuildID)
-	gs, ok := o.state.Guilds[in.GuildID]
+	gs, ok := state.Guilds[in.GuildID]
 	if !ok {
-		gs = o.state.newGuildState(in.GuildID)
+		gs = state.newGuildState(in.GuildID)
 	}
 	tc := time.Duration(in.Position * float32(time.Second))
 	err := gs.seek(tc)
@@ -73,11 +125,12 @@ func (o *orcaServer) Seek(_ context.Context, in *pb.SeekRequest) (*pb.SeekReply,
 	return &pb.SeekReply{}, nil
 }
 
-func (o *orcaServer) Volume(_ context.Context, in *pb.VolumeRequest) (*pb.VolumeReply, error) {
+func (o *orcaServer) Volume(ctx context.Context, in *pb.VolumeRequest) (*pb.VolumeReply, error) {
+	state := ctx.Value("state").(*BotState)
 	o.logger.Infof("Setting guild %s volume to %.2f", in.GuildID, in.Volume)
-	gs, ok := o.state.Guilds[in.GuildID]
+	gs, ok := state.Guilds[in.GuildID]
 	if !ok {
-		gs = o.state.newGuildState(in.GuildID)
+		gs = state.newGuildState(in.GuildID)
 	}
 	gs.TargetVolume = in.Volume / 100
 	return &pb.VolumeReply{}, nil
@@ -96,55 +149,23 @@ func main() {
 }
 
 func run(logger *zap.SugaredLogger) error {
-	// temporary
-	tf, err := os.Open(".token")
-	if err != nil {
-		return err
-	}
-	token, err := io.ReadAll(tf)
-	if err != nil {
-		return err
-	}
-
-	rcb, err := discordgo.New("Bot " + string(token))
-	if err != nil {
-		return err
-	}
-
-	state := newState(logger, rcb)
-	logger.Info(state)
-
-	rcb.Identify.Intents = discordgo.IntentGuildVoiceStates
-	err = rcb.Open()
-	if err != nil {
-		return err
-	}
-
-	defer func() {
-		err := rcb.Close()
-		if err != nil {
-			logger.Error("Error closing bot: ", err)
-		}
-	}()
-
-	logger.Infof("Started the bot")
-
 	port := 8590
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
 		return err
 	}
-	grpcServer := grpc.NewServer()
-	orca := newOrcaServer(logger, rcb)
+	orca := newOrcaServer(logger)
+	grpcServer := grpc.NewServer(
+		grpc.UnaryInterceptor(orca.authInterceptor),
+	)
 	pb.RegisterOrcaServer(grpcServer, orca)
 
 	serverErrors := make(chan error, 1)
 	go func() {
 		serverErrors <- grpcServer.Serve(lis)
 	}()
-	defer func() {
-		grpcServer.GracefulStop()
-	}()
+	defer grpcServer.GracefulStop()
+	defer orca.gracefulShutdown()
 
 	logger.Infof("Started gRPC server on port %d", port)
 

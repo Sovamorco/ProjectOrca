@@ -20,6 +20,100 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type RegisterRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Token string `protobuf:"bytes,1,opt,name=token,proto3" json:"token,omitempty"`
+}
+
+func (x *RegisterRequest) Reset() {
+	*x = RegisterRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_proto_orca_proto_msgTypes[0]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *RegisterRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RegisterRequest) ProtoMessage() {}
+
+func (x *RegisterRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_orca_proto_msgTypes[0]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RegisterRequest.ProtoReflect.Descriptor instead.
+func (*RegisterRequest) Descriptor() ([]byte, []int) {
+	return file_proto_orca_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *RegisterRequest) GetToken() string {
+	if x != nil {
+		return x.Token
+	}
+	return ""
+}
+
+type RegisterReply struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Token string `protobuf:"bytes,1,opt,name=token,proto3" json:"token,omitempty"`
+}
+
+func (x *RegisterReply) Reset() {
+	*x = RegisterReply{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_proto_orca_proto_msgTypes[1]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *RegisterReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RegisterReply) ProtoMessage() {}
+
+func (x *RegisterReply) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_orca_proto_msgTypes[1]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RegisterReply.ProtoReflect.Descriptor instead.
+func (*RegisterReply) Descriptor() ([]byte, []int) {
+	return file_proto_orca_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *RegisterReply) GetToken() string {
+	if x != nil {
+		return x.Token
+	}
+	return ""
+}
+
 type PlayRequest struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -33,7 +127,7 @@ type PlayRequest struct {
 func (x *PlayRequest) Reset() {
 	*x = PlayRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_proto_orca_proto_msgTypes[0]
+		mi := &file_proto_orca_proto_msgTypes[2]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -46,7 +140,7 @@ func (x *PlayRequest) String() string {
 func (*PlayRequest) ProtoMessage() {}
 
 func (x *PlayRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_orca_proto_msgTypes[0]
+	mi := &file_proto_orca_proto_msgTypes[2]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -59,7 +153,7 @@ func (x *PlayRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlayRequest.ProtoReflect.Descriptor instead.
 func (*PlayRequest) Descriptor() ([]byte, []int) {
-	return file_proto_orca_proto_rawDescGZIP(), []int{0}
+	return file_proto_orca_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *PlayRequest) GetGuildID() string {
@@ -94,7 +188,7 @@ type PlayReply struct {
 func (x *PlayReply) Reset() {
 	*x = PlayReply{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_proto_orca_proto_msgTypes[1]
+		mi := &file_proto_orca_proto_msgTypes[3]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -107,7 +201,7 @@ func (x *PlayReply) String() string {
 func (*PlayReply) ProtoMessage() {}
 
 func (x *PlayReply) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_orca_proto_msgTypes[1]
+	mi := &file_proto_orca_proto_msgTypes[3]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -120,7 +214,7 @@ func (x *PlayReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlayReply.ProtoReflect.Descriptor instead.
 func (*PlayReply) Descriptor() ([]byte, []int) {
-	return file_proto_orca_proto_rawDescGZIP(), []int{1}
+	return file_proto_orca_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *PlayReply) GetTrack() *TrackData {
@@ -144,7 +238,7 @@ type TrackData struct {
 func (x *TrackData) Reset() {
 	*x = TrackData{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_proto_orca_proto_msgTypes[2]
+		mi := &file_proto_orca_proto_msgTypes[4]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -157,7 +251,7 @@ func (x *TrackData) String() string {
 func (*TrackData) ProtoMessage() {}
 
 func (x *TrackData) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_orca_proto_msgTypes[2]
+	mi := &file_proto_orca_proto_msgTypes[4]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -170,7 +264,7 @@ func (x *TrackData) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TrackData.ProtoReflect.Descriptor instead.
 func (*TrackData) Descriptor() ([]byte, []int) {
-	return file_proto_orca_proto_rawDescGZIP(), []int{2}
+	return file_proto_orca_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *TrackData) GetTitle() string {
@@ -201,6 +295,91 @@ func (x *TrackData) GetHttpHeaders() map[string]string {
 	return nil
 }
 
+type SkipRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	GuildID string `protobuf:"bytes,1,opt,name=guildID,proto3" json:"guildID,omitempty"`
+}
+
+func (x *SkipRequest) Reset() {
+	*x = SkipRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_proto_orca_proto_msgTypes[5]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *SkipRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SkipRequest) ProtoMessage() {}
+
+func (x *SkipRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_orca_proto_msgTypes[5]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SkipRequest.ProtoReflect.Descriptor instead.
+func (*SkipRequest) Descriptor() ([]byte, []int) {
+	return file_proto_orca_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *SkipRequest) GetGuildID() string {
+	if x != nil {
+		return x.GuildID
+	}
+	return ""
+}
+
+type SkipReply struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+}
+
+func (x *SkipReply) Reset() {
+	*x = SkipReply{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_proto_orca_proto_msgTypes[6]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *SkipReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SkipReply) ProtoMessage() {}
+
+func (x *SkipReply) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_orca_proto_msgTypes[6]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SkipReply.ProtoReflect.Descriptor instead.
+func (*SkipReply) Descriptor() ([]byte, []int) {
+	return file_proto_orca_proto_rawDescGZIP(), []int{6}
+}
+
 type StopRequest struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -212,7 +391,7 @@ type StopRequest struct {
 func (x *StopRequest) Reset() {
 	*x = StopRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_proto_orca_proto_msgTypes[3]
+		mi := &file_proto_orca_proto_msgTypes[7]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -225,7 +404,7 @@ func (x *StopRequest) String() string {
 func (*StopRequest) ProtoMessage() {}
 
 func (x *StopRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_orca_proto_msgTypes[3]
+	mi := &file_proto_orca_proto_msgTypes[7]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -238,7 +417,7 @@ func (x *StopRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StopRequest.ProtoReflect.Descriptor instead.
 func (*StopRequest) Descriptor() ([]byte, []int) {
-	return file_proto_orca_proto_rawDescGZIP(), []int{3}
+	return file_proto_orca_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *StopRequest) GetGuildID() string {
@@ -257,7 +436,7 @@ type StopReply struct {
 func (x *StopReply) Reset() {
 	*x = StopReply{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_proto_orca_proto_msgTypes[4]
+		mi := &file_proto_orca_proto_msgTypes[8]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -270,7 +449,7 @@ func (x *StopReply) String() string {
 func (*StopReply) ProtoMessage() {}
 
 func (x *StopReply) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_orca_proto_msgTypes[4]
+	mi := &file_proto_orca_proto_msgTypes[8]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -283,7 +462,7 @@ func (x *StopReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StopReply.ProtoReflect.Descriptor instead.
 func (*StopReply) Descriptor() ([]byte, []int) {
-	return file_proto_orca_proto_rawDescGZIP(), []int{4}
+	return file_proto_orca_proto_rawDescGZIP(), []int{8}
 }
 
 type SeekRequest struct {
@@ -298,7 +477,7 @@ type SeekRequest struct {
 func (x *SeekRequest) Reset() {
 	*x = SeekRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_proto_orca_proto_msgTypes[5]
+		mi := &file_proto_orca_proto_msgTypes[9]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -311,7 +490,7 @@ func (x *SeekRequest) String() string {
 func (*SeekRequest) ProtoMessage() {}
 
 func (x *SeekRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_orca_proto_msgTypes[5]
+	mi := &file_proto_orca_proto_msgTypes[9]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -324,7 +503,7 @@ func (x *SeekRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SeekRequest.ProtoReflect.Descriptor instead.
 func (*SeekRequest) Descriptor() ([]byte, []int) {
-	return file_proto_orca_proto_rawDescGZIP(), []int{5}
+	return file_proto_orca_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *SeekRequest) GetGuildID() string {
@@ -350,7 +529,7 @@ type SeekReply struct {
 func (x *SeekReply) Reset() {
 	*x = SeekReply{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_proto_orca_proto_msgTypes[6]
+		mi := &file_proto_orca_proto_msgTypes[10]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -363,7 +542,7 @@ func (x *SeekReply) String() string {
 func (*SeekReply) ProtoMessage() {}
 
 func (x *SeekReply) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_orca_proto_msgTypes[6]
+	mi := &file_proto_orca_proto_msgTypes[10]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -376,7 +555,7 @@ func (x *SeekReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SeekReply.ProtoReflect.Descriptor instead.
 func (*SeekReply) Descriptor() ([]byte, []int) {
-	return file_proto_orca_proto_rawDescGZIP(), []int{6}
+	return file_proto_orca_proto_rawDescGZIP(), []int{10}
 }
 
 type VolumeRequest struct {
@@ -391,7 +570,7 @@ type VolumeRequest struct {
 func (x *VolumeRequest) Reset() {
 	*x = VolumeRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_proto_orca_proto_msgTypes[7]
+		mi := &file_proto_orca_proto_msgTypes[11]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -404,7 +583,7 @@ func (x *VolumeRequest) String() string {
 func (*VolumeRequest) ProtoMessage() {}
 
 func (x *VolumeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_orca_proto_msgTypes[7]
+	mi := &file_proto_orca_proto_msgTypes[11]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -417,7 +596,7 @@ func (x *VolumeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VolumeRequest.ProtoReflect.Descriptor instead.
 func (*VolumeRequest) Descriptor() ([]byte, []int) {
-	return file_proto_orca_proto_rawDescGZIP(), []int{7}
+	return file_proto_orca_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *VolumeRequest) GetGuildID() string {
@@ -443,7 +622,7 @@ type VolumeReply struct {
 func (x *VolumeReply) Reset() {
 	*x = VolumeReply{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_proto_orca_proto_msgTypes[8]
+		mi := &file_proto_orca_proto_msgTypes[12]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -456,7 +635,7 @@ func (x *VolumeReply) String() string {
 func (*VolumeReply) ProtoMessage() {}
 
 func (x *VolumeReply) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_orca_proto_msgTypes[8]
+	mi := &file_proto_orca_proto_msgTypes[12]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -469,14 +648,19 @@ func (x *VolumeReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VolumeReply.ProtoReflect.Descriptor instead.
 func (*VolumeReply) Descriptor() ([]byte, []int) {
-	return file_proto_orca_proto_rawDescGZIP(), []int{8}
+	return file_proto_orca_proto_rawDescGZIP(), []int{12}
 }
 
 var File_proto_orca_proto protoreflect.FileDescriptor
 
 var file_proto_orca_proto_rawDesc = []byte{
 	0x0a, 0x10, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2f, 0x6f, 0x72, 0x63, 0x61, 0x2e, 0x70, 0x72, 0x6f,
-	0x74, 0x6f, 0x12, 0x04, 0x6f, 0x72, 0x63, 0x61, 0x22, 0x57, 0x0a, 0x0b, 0x50, 0x6c, 0x61, 0x79,
+	0x74, 0x6f, 0x12, 0x04, 0x6f, 0x72, 0x63, 0x61, 0x22, 0x27, 0x0a, 0x0f, 0x52, 0x65, 0x67, 0x69,
+	0x73, 0x74, 0x65, 0x72, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x14, 0x0a, 0x05, 0x74,
+	0x6f, 0x6b, 0x65, 0x6e, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x05, 0x74, 0x6f, 0x6b, 0x65,
+	0x6e, 0x22, 0x25, 0x0a, 0x0d, 0x52, 0x65, 0x67, 0x69, 0x73, 0x74, 0x65, 0x72, 0x52, 0x65, 0x70,
+	0x6c, 0x79, 0x12, 0x14, 0x0a, 0x05, 0x74, 0x6f, 0x6b, 0x65, 0x6e, 0x18, 0x01, 0x20, 0x01, 0x28,
+	0x09, 0x52, 0x05, 0x74, 0x6f, 0x6b, 0x65, 0x6e, 0x22, 0x57, 0x0a, 0x0b, 0x50, 0x6c, 0x61, 0x79,
 	0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x18, 0x0a, 0x07, 0x67, 0x75, 0x69, 0x6c, 0x64,
 	0x49, 0x44, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x07, 0x67, 0x75, 0x69, 0x6c, 0x64, 0x49,
 	0x44, 0x12, 0x1c, 0x0a, 0x09, 0x63, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x49, 0x44, 0x18, 0x02,
@@ -499,35 +683,45 @@ var file_proto_orca_proto_rawDesc = []byte{
 	0x45, 0x6e, 0x74, 0x72, 0x79, 0x12, 0x10, 0x0a, 0x03, 0x6b, 0x65, 0x79, 0x18, 0x01, 0x20, 0x01,
 	0x28, 0x09, 0x52, 0x03, 0x6b, 0x65, 0x79, 0x12, 0x14, 0x0a, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65,
 	0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x3a, 0x02, 0x38,
-	0x01, 0x22, 0x27, 0x0a, 0x0b, 0x53, 0x74, 0x6f, 0x70, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74,
+	0x01, 0x22, 0x27, 0x0a, 0x0b, 0x53, 0x6b, 0x69, 0x70, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74,
 	0x12, 0x18, 0x0a, 0x07, 0x67, 0x75, 0x69, 0x6c, 0x64, 0x49, 0x44, 0x18, 0x01, 0x20, 0x01, 0x28,
-	0x09, 0x52, 0x07, 0x67, 0x75, 0x69, 0x6c, 0x64, 0x49, 0x44, 0x22, 0x0b, 0x0a, 0x09, 0x53, 0x74,
-	0x6f, 0x70, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x22, 0x43, 0x0a, 0x0b, 0x53, 0x65, 0x65, 0x6b, 0x52,
+	0x09, 0x52, 0x07, 0x67, 0x75, 0x69, 0x6c, 0x64, 0x49, 0x44, 0x22, 0x0b, 0x0a, 0x09, 0x53, 0x6b,
+	0x69, 0x70, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x22, 0x27, 0x0a, 0x0b, 0x53, 0x74, 0x6f, 0x70, 0x52,
 	0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x18, 0x0a, 0x07, 0x67, 0x75, 0x69, 0x6c, 0x64, 0x49,
 	0x44, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x07, 0x67, 0x75, 0x69, 0x6c, 0x64, 0x49, 0x44,
-	0x12, 0x1a, 0x0a, 0x08, 0x70, 0x6f, 0x73, 0x69, 0x74, 0x69, 0x6f, 0x6e, 0x18, 0x02, 0x20, 0x01,
-	0x28, 0x02, 0x52, 0x08, 0x70, 0x6f, 0x73, 0x69, 0x74, 0x69, 0x6f, 0x6e, 0x22, 0x0b, 0x0a, 0x09,
-	0x53, 0x65, 0x65, 0x6b, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x22, 0x41, 0x0a, 0x0d, 0x56, 0x6f, 0x6c,
-	0x75, 0x6d, 0x65, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x18, 0x0a, 0x07, 0x67, 0x75,
-	0x69, 0x6c, 0x64, 0x49, 0x44, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x07, 0x67, 0x75, 0x69,
-	0x6c, 0x64, 0x49, 0x44, 0x12, 0x16, 0x0a, 0x06, 0x76, 0x6f, 0x6c, 0x75, 0x6d, 0x65, 0x18, 0x02,
-	0x20, 0x01, 0x28, 0x02, 0x52, 0x06, 0x76, 0x6f, 0x6c, 0x75, 0x6d, 0x65, 0x22, 0x0d, 0x0a, 0x0b,
-	0x56, 0x6f, 0x6c, 0x75, 0x6d, 0x65, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x32, 0xc4, 0x01, 0x0a, 0x04,
-	0x4f, 0x72, 0x63, 0x61, 0x12, 0x2c, 0x0a, 0x04, 0x50, 0x6c, 0x61, 0x79, 0x12, 0x11, 0x2e, 0x6f,
+	0x22, 0x0b, 0x0a, 0x09, 0x53, 0x74, 0x6f, 0x70, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x22, 0x43, 0x0a,
+	0x0b, 0x53, 0x65, 0x65, 0x6b, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x18, 0x0a, 0x07,
+	0x67, 0x75, 0x69, 0x6c, 0x64, 0x49, 0x44, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x07, 0x67,
+	0x75, 0x69, 0x6c, 0x64, 0x49, 0x44, 0x12, 0x1a, 0x0a, 0x08, 0x70, 0x6f, 0x73, 0x69, 0x74, 0x69,
+	0x6f, 0x6e, 0x18, 0x02, 0x20, 0x01, 0x28, 0x02, 0x52, 0x08, 0x70, 0x6f, 0x73, 0x69, 0x74, 0x69,
+	0x6f, 0x6e, 0x22, 0x0b, 0x0a, 0x09, 0x53, 0x65, 0x65, 0x6b, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x22,
+	0x41, 0x0a, 0x0d, 0x56, 0x6f, 0x6c, 0x75, 0x6d, 0x65, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74,
+	0x12, 0x18, 0x0a, 0x07, 0x67, 0x75, 0x69, 0x6c, 0x64, 0x49, 0x44, 0x18, 0x01, 0x20, 0x01, 0x28,
+	0x09, 0x52, 0x07, 0x67, 0x75, 0x69, 0x6c, 0x64, 0x49, 0x44, 0x12, 0x16, 0x0a, 0x06, 0x76, 0x6f,
+	0x6c, 0x75, 0x6d, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x02, 0x52, 0x06, 0x76, 0x6f, 0x6c, 0x75,
+	0x6d, 0x65, 0x22, 0x0d, 0x0a, 0x0b, 0x56, 0x6f, 0x6c, 0x75, 0x6d, 0x65, 0x52, 0x65, 0x70, 0x6c,
+	0x79, 0x32, 0xac, 0x02, 0x0a, 0x04, 0x4f, 0x72, 0x63, 0x61, 0x12, 0x38, 0x0a, 0x08, 0x52, 0x65,
+	0x67, 0x69, 0x73, 0x74, 0x65, 0x72, 0x12, 0x15, 0x2e, 0x6f, 0x72, 0x63, 0x61, 0x2e, 0x52, 0x65,
+	0x67, 0x69, 0x73, 0x74, 0x65, 0x72, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x13, 0x2e,
+	0x6f, 0x72, 0x63, 0x61, 0x2e, 0x52, 0x65, 0x67, 0x69, 0x73, 0x74, 0x65, 0x72, 0x52, 0x65, 0x70,
+	0x6c, 0x79, 0x22, 0x00, 0x12, 0x2c, 0x0a, 0x04, 0x50, 0x6c, 0x61, 0x79, 0x12, 0x11, 0x2e, 0x6f,
 	0x72, 0x63, 0x61, 0x2e, 0x50, 0x6c, 0x61, 0x79, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a,
 	0x0f, 0x2e, 0x6f, 0x72, 0x63, 0x61, 0x2e, 0x50, 0x6c, 0x61, 0x79, 0x52, 0x65, 0x70, 0x6c, 0x79,
-	0x22, 0x00, 0x12, 0x2c, 0x0a, 0x04, 0x53, 0x74, 0x6f, 0x70, 0x12, 0x11, 0x2e, 0x6f, 0x72, 0x63,
-	0x61, 0x2e, 0x53, 0x74, 0x6f, 0x70, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x0f, 0x2e,
-	0x6f, 0x72, 0x63, 0x61, 0x2e, 0x53, 0x74, 0x6f, 0x70, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x22, 0x00,
-	0x12, 0x2c, 0x0a, 0x04, 0x53, 0x65, 0x65, 0x6b, 0x12, 0x11, 0x2e, 0x6f, 0x72, 0x63, 0x61, 0x2e,
-	0x53, 0x65, 0x65, 0x6b, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x0f, 0x2e, 0x6f, 0x72,
-	0x63, 0x61, 0x2e, 0x53, 0x65, 0x65, 0x6b, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x22, 0x00, 0x12, 0x32,
-	0x0a, 0x06, 0x56, 0x6f, 0x6c, 0x75, 0x6d, 0x65, 0x12, 0x13, 0x2e, 0x6f, 0x72, 0x63, 0x61, 0x2e,
-	0x56, 0x6f, 0x6c, 0x75, 0x6d, 0x65, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x11, 0x2e,
-	0x6f, 0x72, 0x63, 0x61, 0x2e, 0x56, 0x6f, 0x6c, 0x75, 0x6d, 0x65, 0x52, 0x65, 0x70, 0x6c, 0x79,
-	0x22, 0x00, 0x42, 0x18, 0x5a, 0x16, 0x50, 0x72, 0x6f, 0x6a, 0x65, 0x63, 0x74, 0x4f, 0x72, 0x63,
-	0x61, 0x2f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2f, 0x6f, 0x72, 0x63, 0x61, 0x62, 0x06, 0x70, 0x72,
-	0x6f, 0x74, 0x6f, 0x33,
+	0x22, 0x00, 0x12, 0x2c, 0x0a, 0x04, 0x53, 0x6b, 0x69, 0x70, 0x12, 0x11, 0x2e, 0x6f, 0x72, 0x63,
+	0x61, 0x2e, 0x53, 0x6b, 0x69, 0x70, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x0f, 0x2e,
+	0x6f, 0x72, 0x63, 0x61, 0x2e, 0x53, 0x6b, 0x69, 0x70, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x22, 0x00,
+	0x12, 0x2c, 0x0a, 0x04, 0x53, 0x74, 0x6f, 0x70, 0x12, 0x11, 0x2e, 0x6f, 0x72, 0x63, 0x61, 0x2e,
+	0x53, 0x74, 0x6f, 0x70, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x0f, 0x2e, 0x6f, 0x72,
+	0x63, 0x61, 0x2e, 0x53, 0x74, 0x6f, 0x70, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x22, 0x00, 0x12, 0x2c,
+	0x0a, 0x04, 0x53, 0x65, 0x65, 0x6b, 0x12, 0x11, 0x2e, 0x6f, 0x72, 0x63, 0x61, 0x2e, 0x53, 0x65,
+	0x65, 0x6b, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x0f, 0x2e, 0x6f, 0x72, 0x63, 0x61,
+	0x2e, 0x53, 0x65, 0x65, 0x6b, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x22, 0x00, 0x12, 0x32, 0x0a, 0x06,
+	0x56, 0x6f, 0x6c, 0x75, 0x6d, 0x65, 0x12, 0x13, 0x2e, 0x6f, 0x72, 0x63, 0x61, 0x2e, 0x56, 0x6f,
+	0x6c, 0x75, 0x6d, 0x65, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x11, 0x2e, 0x6f, 0x72,
+	0x63, 0x61, 0x2e, 0x56, 0x6f, 0x6c, 0x75, 0x6d, 0x65, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x22, 0x00,
+	0x42, 0x18, 0x5a, 0x16, 0x50, 0x72, 0x6f, 0x6a, 0x65, 0x63, 0x74, 0x4f, 0x72, 0x63, 0x61, 0x2f,
+	0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2f, 0x6f, 0x72, 0x63, 0x61, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74,
+	0x6f, 0x33,
 }
 
 var (
@@ -542,35 +736,43 @@ func file_proto_orca_proto_rawDescGZIP() []byte {
 	return file_proto_orca_proto_rawDescData
 }
 
-var file_proto_orca_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_proto_orca_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_proto_orca_proto_goTypes = []interface{}{
-	(*PlayRequest)(nil),   // 0: orca.PlayRequest
-	(*PlayReply)(nil),     // 1: orca.PlayReply
-	(*TrackData)(nil),     // 2: orca.TrackData
-	(*StopRequest)(nil),   // 3: orca.StopRequest
-	(*StopReply)(nil),     // 4: orca.StopReply
-	(*SeekRequest)(nil),   // 5: orca.SeekRequest
-	(*SeekReply)(nil),     // 6: orca.SeekReply
-	(*VolumeRequest)(nil), // 7: orca.VolumeRequest
-	(*VolumeReply)(nil),   // 8: orca.VolumeReply
-	nil,                   // 9: orca.TrackData.HttpHeadersEntry
+	(*RegisterRequest)(nil), // 0: orca.RegisterRequest
+	(*RegisterReply)(nil),   // 1: orca.RegisterReply
+	(*PlayRequest)(nil),     // 2: orca.PlayRequest
+	(*PlayReply)(nil),       // 3: orca.PlayReply
+	(*TrackData)(nil),       // 4: orca.TrackData
+	(*SkipRequest)(nil),     // 5: orca.SkipRequest
+	(*SkipReply)(nil),       // 6: orca.SkipReply
+	(*StopRequest)(nil),     // 7: orca.StopRequest
+	(*StopReply)(nil),       // 8: orca.StopReply
+	(*SeekRequest)(nil),     // 9: orca.SeekRequest
+	(*SeekReply)(nil),       // 10: orca.SeekReply
+	(*VolumeRequest)(nil),   // 11: orca.VolumeRequest
+	(*VolumeReply)(nil),     // 12: orca.VolumeReply
+	nil,                     // 13: orca.TrackData.HttpHeadersEntry
 }
 var file_proto_orca_proto_depIdxs = []int32{
-	2, // 0: orca.PlayReply.track:type_name -> orca.TrackData
-	9, // 1: orca.TrackData.httpHeaders:type_name -> orca.TrackData.HttpHeadersEntry
-	0, // 2: orca.Orca.Play:input_type -> orca.PlayRequest
-	3, // 3: orca.Orca.Stop:input_type -> orca.StopRequest
-	5, // 4: orca.Orca.Seek:input_type -> orca.SeekRequest
-	7, // 5: orca.Orca.Volume:input_type -> orca.VolumeRequest
-	1, // 6: orca.Orca.Play:output_type -> orca.PlayReply
-	4, // 7: orca.Orca.Stop:output_type -> orca.StopReply
-	6, // 8: orca.Orca.Seek:output_type -> orca.SeekReply
-	8, // 9: orca.Orca.Volume:output_type -> orca.VolumeReply
-	6, // [6:10] is the sub-list for method output_type
-	2, // [2:6] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	4,  // 0: orca.PlayReply.track:type_name -> orca.TrackData
+	13, // 1: orca.TrackData.httpHeaders:type_name -> orca.TrackData.HttpHeadersEntry
+	0,  // 2: orca.Orca.Register:input_type -> orca.RegisterRequest
+	2,  // 3: orca.Orca.Play:input_type -> orca.PlayRequest
+	5,  // 4: orca.Orca.Skip:input_type -> orca.SkipRequest
+	7,  // 5: orca.Orca.Stop:input_type -> orca.StopRequest
+	9,  // 6: orca.Orca.Seek:input_type -> orca.SeekRequest
+	11, // 7: orca.Orca.Volume:input_type -> orca.VolumeRequest
+	1,  // 8: orca.Orca.Register:output_type -> orca.RegisterReply
+	3,  // 9: orca.Orca.Play:output_type -> orca.PlayReply
+	6,  // 10: orca.Orca.Skip:output_type -> orca.SkipReply
+	8,  // 11: orca.Orca.Stop:output_type -> orca.StopReply
+	10, // 12: orca.Orca.Seek:output_type -> orca.SeekReply
+	12, // 13: orca.Orca.Volume:output_type -> orca.VolumeReply
+	8,  // [8:14] is the sub-list for method output_type
+	2,  // [2:8] is the sub-list for method input_type
+	2,  // [2:2] is the sub-list for extension type_name
+	2,  // [2:2] is the sub-list for extension extendee
+	0,  // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_proto_orca_proto_init() }
@@ -580,7 +782,7 @@ func file_proto_orca_proto_init() {
 	}
 	if !protoimpl.UnsafeEnabled {
 		file_proto_orca_proto_msgTypes[0].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*PlayRequest); i {
+			switch v := v.(*RegisterRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -592,7 +794,7 @@ func file_proto_orca_proto_init() {
 			}
 		}
 		file_proto_orca_proto_msgTypes[1].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*PlayReply); i {
+			switch v := v.(*RegisterReply); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -604,7 +806,7 @@ func file_proto_orca_proto_init() {
 			}
 		}
 		file_proto_orca_proto_msgTypes[2].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*TrackData); i {
+			switch v := v.(*PlayRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -616,7 +818,7 @@ func file_proto_orca_proto_init() {
 			}
 		}
 		file_proto_orca_proto_msgTypes[3].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*StopRequest); i {
+			switch v := v.(*PlayReply); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -628,7 +830,7 @@ func file_proto_orca_proto_init() {
 			}
 		}
 		file_proto_orca_proto_msgTypes[4].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*StopReply); i {
+			switch v := v.(*TrackData); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -640,7 +842,7 @@ func file_proto_orca_proto_init() {
 			}
 		}
 		file_proto_orca_proto_msgTypes[5].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*SeekRequest); i {
+			switch v := v.(*SkipRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -652,7 +854,7 @@ func file_proto_orca_proto_init() {
 			}
 		}
 		file_proto_orca_proto_msgTypes[6].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*SeekReply); i {
+			switch v := v.(*SkipReply); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -664,7 +866,7 @@ func file_proto_orca_proto_init() {
 			}
 		}
 		file_proto_orca_proto_msgTypes[7].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*VolumeRequest); i {
+			switch v := v.(*StopRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -676,6 +878,54 @@ func file_proto_orca_proto_init() {
 			}
 		}
 		file_proto_orca_proto_msgTypes[8].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*StopReply); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_proto_orca_proto_msgTypes[9].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*SeekRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_proto_orca_proto_msgTypes[10].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*SeekReply); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_proto_orca_proto_msgTypes[11].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*VolumeRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_proto_orca_proto_msgTypes[12].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*VolumeReply); i {
 			case 0:
 				return &v.state
@@ -694,7 +944,7 @@ func file_proto_orca_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_proto_orca_proto_rawDesc,
 			NumEnums:      0,
-			NumMessages:   10,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

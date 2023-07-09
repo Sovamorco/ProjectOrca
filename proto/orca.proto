@@ -3,10 +3,20 @@ package orca;
 option go_package = "ProjectOrca/proto/orca";
 
 service Orca {
+  rpc Register (RegisterRequest) returns (RegisterReply) {}
   rpc Play (PlayRequest) returns (PlayReply) {}
+  rpc Skip (SkipRequest) returns (SkipReply) {}
   rpc Stop (StopRequest) returns (StopReply) {}
   rpc Seek (SeekRequest) returns (SeekReply) {}
   rpc Volume (VolumeRequest) returns (VolumeReply) {}
+}
+
+message RegisterRequest {
+  string token = 1;
+}
+
+message RegisterReply {
+  string token = 1;
 }
 
 message PlayRequest {
@@ -25,6 +35,12 @@ message TrackData {
   string url = 3;
   map<string, string> httpHeaders = 4;
 }
+
+message SkipRequest {
+  string guildID = 1;
+}
+
+message SkipReply {}
 
 message StopRequest {
   string guildID = 1;

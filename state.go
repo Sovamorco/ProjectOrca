@@ -8,14 +8,14 @@ import (
 	"time"
 )
 
-type State struct {
+type BotState struct {
 	Guilds  map[string]*GuildState
 	Logger  *zap.SugaredLogger
 	Session *discordgo.Session
 }
 
-func newState(logger *zap.SugaredLogger, session *discordgo.Session) *State {
-	s := State{
+func newState(logger *zap.SugaredLogger, session *discordgo.Session) *BotState {
+	s := BotState{
 		Guilds:  make(map[string]*GuildState),
 		Logger:  logger,
 		Session: session,
@@ -23,23 +23,40 @@ func newState(logger *zap.SugaredLogger, session *discordgo.Session) *State {
 	return &s
 }
 
+func (s *BotState) gracefulShutdown() {
+	var err error
+	for _, gs := range s.Guilds {
+		gs.gracefulShutdown()
+	}
+	err = s.Session.Close()
+	if err != nil {
+		s.Logger.Error("Error closing session: ", err)
+	}
+}
+
 type GuildState struct {
-	*State
+	*BotState
+	Logger       *zap.SugaredLogger
 	GuildID      string
 	Queue        *Queue
 	Volume       float32
 	TargetVolume float32
 }
 
-func (s *State) newGuildState(guildID string) *GuildState {
+func (s *BotState) newGuildState(guildID string) *GuildState {
 	gs := &GuildState{
-		State:        s,
+		Logger:       s.Logger.With("label", "guildState", "guildID", guildID),
+		BotState:     s,
 		GuildID:      guildID,
 		Volume:       1,
 		TargetVolume: 1,
 	}
 	s.Guilds[guildID] = gs
 	return gs
+}
+
+func (g *GuildState) gracefulShutdown() {
+	_ = g.stop()
 }
 
 func (g *GuildState) playSound(channelID, url string) (*pb.TrackData, error) {
@@ -65,11 +82,21 @@ func (g *GuildState) playSound(channelID, url string) (*pb.TrackData, error) {
 	return ms.TrackData, nil
 }
 
-func (g *GuildState) stop() error {
+func (g *GuildState) skip() error {
 	if len(g.Queue.Tracks) < 1 {
 		return errors.New("Nothing playing")
 	}
 	g.Queue.Tracks[0].Stop <- struct{}{}
+	return nil
+}
+
+func (g *GuildState) stop() error {
+	if len(g.Queue.Tracks) < 1 {
+		return errors.New("Nothing playing")
+	}
+	current := g.Queue.Tracks[0]
+	g.Queue.Tracks = nil
+	current.Stop <- struct{}{}
 	return nil
 }
 

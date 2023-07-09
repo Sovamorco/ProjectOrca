@@ -1,8 +1,12 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"regexp"
 )
+
+const TokenLength = 128
 
 var urlRx = regexp.MustCompile(`https?://(?:www\.)?.+`)
 
@@ -20,4 +24,13 @@ func empty[T any](c chan T) {
 		default:
 		}
 	}
+}
+
+// https://stackoverflow.com/questions/45267125/how-to-generate-unique-random-alphanumeric-tokens-in-golang
+func generateSecureToken() (string, error) {
+	b := make([]byte, TokenLength)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }
