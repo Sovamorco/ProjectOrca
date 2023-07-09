@@ -9,16 +9,18 @@ import (
 )
 
 type BotState struct {
+	Token   string
 	Guilds  map[string]*GuildState
 	Logger  *zap.SugaredLogger
 	Session *discordgo.Session
 }
 
-func newState(logger *zap.SugaredLogger, session *discordgo.Session) *BotState {
+func newState(logger *zap.SugaredLogger, session *discordgo.Session, token string) *BotState {
 	s := BotState{
 		Guilds:  make(map[string]*GuildState),
 		Logger:  logger,
 		Session: session,
+		Token:   token,
 	}
 	return &s
 }

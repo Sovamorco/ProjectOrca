@@ -48,20 +48,42 @@ func (o *orcaServer) authInterceptor(ctx context.Context, req any, _ *grpc.Unary
 		return nil, status.Error(codes.Unauthenticated, "missing token")
 	}
 	token := tokenS[0]
+	botIDS := md.Get("botID")
+	if len(botIDS) != 1 {
+		return nil, status.Error(codes.Unauthenticated, "missing bot id")
+	}
+	botID := botIDS[0]
+	ctx = context.WithValue(ctx, "botID", botID)
 	if _, ok := req.(*pb.RegisterRequest); token == "" && ok {
 		return handler(ctx, req)
 	}
-	state, ok := o.states[token]
+	state, ok := o.states[botID]
 	if !ok {
 		return nil, status.Error(codes.Unauthenticated, "not registered")
+	}
+	if state.Token != token {
+		return nil, status.Error(codes.Unauthenticated, "invalid token")
 	}
 	return handler(context.WithValue(ctx, "state", state), req)
 }
 
-func (o *orcaServer) Register(_ context.Context, in *pb.RegisterRequest) (*pb.RegisterReply, error) {
+func (o *orcaServer) Register(ctx context.Context, in *pb.RegisterRequest) (*pb.RegisterReply, error) {
+	botID := ctx.Value("botID").(string)
+	o.logger.Infof("Received registration request for bot %s", botID)
 	newToken, err := generateSecureToken()
 	if err != nil {
 		return nil, err
+	}
+	state, ok := o.states[botID]
+	if ok {
+		o.logger.Infof("Bot %s already registered, reregestering", botID)
+		if in.Token != state.Session.Identify.Token {
+			return nil, status.Error(codes.Unauthenticated, "invalid token")
+		}
+		state.Token = newToken
+		return &pb.RegisterReply{
+			Token: newToken,
+		}, nil
 	}
 	session, err := discordgo.New(in.Token)
 	if err != nil {
@@ -72,9 +94,9 @@ func (o *orcaServer) Register(_ context.Context, in *pb.RegisterRequest) (*pb.Re
 	if err != nil {
 		return nil, err
 	}
-	stateLogger := o.logger.With("label", "state", "botID", session.State.Ready.User.ID)
+	stateLogger := o.logger.With("label", "state", "botID", botID)
 	stateLogger.Infof("Started the bot")
-	o.states[newToken] = newState(stateLogger, session)
+	o.states[botID] = newState(stateLogger, session, newToken)
 	return &pb.RegisterReply{
 		Token: newToken,
 	}, nil
@@ -94,6 +116,20 @@ func (o *orcaServer) Play(ctx context.Context, in *pb.PlayRequest) (*pb.PlayRepl
 	return &pb.PlayReply{
 		Track: trackData,
 	}, nil
+}
+
+func (o *orcaServer) Skip(ctx context.Context, in *pb.SkipRequest) (*pb.SkipReply, error) {
+	state := ctx.Value("state").(*BotState)
+	o.logger.Infof("Skipping track in guild %s", in.GuildID)
+	gs, ok := state.Guilds[in.GuildID]
+	if !ok {
+		gs = state.newGuildState(in.GuildID)
+	}
+	err := gs.skip()
+	if err != nil {
+		return nil, err
+	}
+	return &pb.SkipReply{}, nil
 }
 
 func (o *orcaServer) Stop(ctx context.Context, in *pb.StopRequest) (*pb.StopReply, error) {

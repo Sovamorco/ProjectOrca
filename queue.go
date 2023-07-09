@@ -49,6 +49,10 @@ func (q *Queue) start() {
 		if err != nil {
 			q.Logger.Error("Error when streaming track: ", err)
 		}
+		// check before indexing because of stop call
+		if len(q.Tracks) < 1 {
+			break
+		}
 		q.Tracks = q.Tracks[1:]
 	}
 }
