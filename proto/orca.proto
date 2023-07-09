@@ -4,6 +4,9 @@ option go_package = "ProjectOrca/proto/orca";
 
 service Orca {
   rpc Play (PlayRequest) returns (PlayReply) {}
+  rpc Stop (StopRequest) returns (StopReply) {}
+  rpc Seek (SeekRequest) returns (SeekReply) {}
+  rpc Volume (VolumeRequest) returns (VolumeReply) {}
 }
 
 message PlayRequest {
@@ -22,3 +25,23 @@ message TrackData {
   string url = 3;
   map<string, string> httpHeaders = 4;
 }
+
+message StopRequest {
+  string guildID = 1;
+}
+
+message StopReply {}
+
+message SeekRequest {
+  string guildID = 1;
+  float position = 2;
+}
+
+message SeekReply {}
+
+message VolumeRequest {
+  string guildID = 1;
+  float volume = 2;
+}
+
+message VolumeReply {}

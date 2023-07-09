@@ -5,6 +5,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
+	"time"
 )
 
 type State struct {
@@ -41,38 +42,6 @@ func (s *State) newGuildState(guildID string) *GuildState {
 	return gs
 }
 
-//func (g *GuildState) seekHandler(i *discordgo.InteractionCreate) error {
-//	options := i.ApplicationCommandData().Options
-//	if len(options) < 1 {
-//		return errors.New("missing seek point")
-//	}
-//	tcF := options[0].Value.(float64)
-//	tc := time.Duration(tcF)
-//	g.Logger.Infof("seek to %ds", tc)
-//	err := g.Queue.Tracks[0].seek(time.Second * tc)
-//	if err != nil {
-//		return errors.Wrap(err, "seek")
-//	}
-//	return g.respondSimpleMessage(i, fmt.Sprintf("seek to %ds", tc))
-//}
-//
-//func (g *GuildState) volumeHandler(i *discordgo.InteractionCreate) error {
-//	options := i.ApplicationCommandData().Options
-//	if len(options) < 1 {
-//		return errors.New("missing volume")
-//	}
-//	volume := options[0].Value.(float64)
-//	g.Logger.Infof("set volume to %f%%", volume)
-//	g.TargetVolume = float32(volume / 100)
-//	return g.respondSimpleMessage(i, fmt.Sprintf("set volume to %.2f%%", volume))
-//}
-//
-//func (g *GuildState) stopHandler(i *discordgo.InteractionCreate) error {
-//	g.Logger.Info("Stop current track")
-//	g.Queue.Tracks[0].Stop <- struct{}{}
-//	return g.respondSimpleMessage(i, "stopped")
-//}
-
 func (g *GuildState) playSound(channelID, url string) (*pb.TrackData, error) {
 	var ms *MusicTrack
 
@@ -94,4 +63,20 @@ func (g *GuildState) playSound(channelID, url string) (*pb.TrackData, error) {
 		return nil, errors.Wrap(err, "add track to Queue")
 	}
 	return ms.TrackData, nil
+}
+
+func (g *GuildState) stop() error {
+	if len(g.Queue.Tracks) < 1 {
+		return errors.New("Nothing playing")
+	}
+	g.Queue.Tracks[0].Stop <- struct{}{}
+	return nil
+}
+
+func (g *GuildState) seek(pos time.Duration) error {
+	if len(g.Queue.Tracks) < 1 {
+		return errors.New("Nothing playing")
+	}
+	err := g.Queue.Tracks[0].seek(pos)
+	return errors.Wrap(err, "seek")
 }

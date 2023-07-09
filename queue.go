@@ -43,7 +43,7 @@ func (q *Queue) start() {
 	}(vc)
 
 	for len(q.Tracks) > 0 {
-		done := make(chan error)
+		done := make(chan error, 1)
 		q.Tracks[0].streamToVC(q.vc, done)
 		err := <-done
 		if err != nil {

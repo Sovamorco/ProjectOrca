@@ -11,6 +11,7 @@ import (
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"strings"
@@ -61,6 +62,7 @@ type MusicTrack struct {
 	Stream    io.ReadCloser
 	Stop      chan struct{}
 	TrackData *pb.TrackData
+	Logger    *zap.SugaredLogger
 }
 
 func (q *Queue) newMusicTrack(url string) (*MusicTrack, error) {
@@ -70,25 +72,33 @@ func (q *Queue) newMusicTrack(url string) (*MusicTrack, error) {
 }
 
 func (q *Queue) newMusicTrackEmpty() *MusicTrack {
+	logger := q.Logger
 	return &MusicTrack{
-		Queue: q,
-		Stop:  make(chan struct{}),
+		Queue:  q,
+		Stop:   make(chan struct{}),
+		Logger: logger,
 	}
 }
 
 func (ms *MusicTrack) seek(pos time.Duration) error {
+	ms.Lock()
 	oldCmd, oldStream := ms.CMD, ms.Stream
 	err := ms.getStream(pos)
+	ms.Unlock()
 	if err != nil {
 		return errors.Wrap(err, "get Stream")
 	}
-	err = oldStream.Close()
-	if err != nil {
-		ms.Logger.Error("Error closing old Stream: ", err)
+	if oldStream != nil {
+		err = oldStream.Close()
+		if err != nil {
+			ms.Logger.Error("Error closing old Stream: ", err)
+		}
 	}
-	err = oldCmd.Process.Signal(syscall.SIGTERM)
-	if err != nil {
-		ms.Logger.Error("Error killing old ffmpeg: ", err)
+	if oldCmd != nil {
+		err = oldCmd.Process.Signal(syscall.SIGTERM)
+		if err != nil {
+			ms.Logger.Error("Error killing old ffmpeg: ", err)
+		}
 	}
 	return nil
 }
@@ -142,6 +152,7 @@ func (ms *MusicTrack) getStreamURL(url string) error {
 		ad = vd.Entries[0]
 	}
 	ms.TrackData = ad.toProto()
+	ms.Logger = ms.Logger.With("track", ms.TrackData.Title)
 	return nil
 }
 
@@ -153,6 +164,8 @@ func (ms *MusicTrack) getFormattedHeaders() string {
 	return strings.Join(fmtd, "\r\n")
 }
 
+// getStream gets a stream for current song on specific position
+// it DOES NOT lock the track, please lock in the caller function
 func (ms *MusicTrack) getStream(pos time.Duration) error {
 	ffmpegArgs := []string{
 		"-headers", ms.getFormattedHeaders(),
@@ -192,16 +205,18 @@ func (ms *MusicTrack) getStream(pos time.Duration) error {
 	if err != nil {
 		return errors.Wrap(err, "start ffmpeg process")
 	}
-	ms.Lock()
 	ms.CMD = ffmpeg
 	ms.Stream = buf
-	ms.Unlock()
 	return nil
 }
 
 func (ms *MusicTrack) streamToVC(vc *discordgo.VoiceConnection, done chan error) {
+	ms.Logger.Info("Streaming to VC")
+	defer ms.Logger.Info("Finished streaming to VC")
 	defer close(done)
+	ms.Lock()
 	err := ms.getStream(0)
+	ms.Unlock()
 	if err != nil {
 		done <- errors.Wrap(err, "get Stream")
 		return
@@ -218,28 +233,38 @@ func (ms *MusicTrack) streamToVC(vc *discordgo.VoiceConnection, done chan error)
 			ms.Logger.Error("Error killing ffmpeg process: ", err)
 		}
 	}(ms.CMD.Process)
+	rawPcmFrame := make([]byte, 4*frameSize)
 	pcmFrame := make([]float32, frameSize)
 	enc, err := opus.NewEncoder(sampleRate, channels, opus.Audio)
 	if err != nil {
 		done <- errors.Wrap(err, "create opus encoder")
 		return
 	}
+	var n int
 	for {
 		ms.Lock()
-		err = binary.Read(ms.Stream, binary.BigEndian, pcmFrame)
+		n, err = io.ReadFull(ms.Stream, rawPcmFrame)
 		ms.Unlock()
 		if err != nil {
-			if !errors.Is(err, io.EOF) {
-				done <- errors.Wrap(err, "read audio Stream")
+			if !errors.Is(err, io.ErrUnexpectedEOF) {
+				{
+					if !errors.Is(err, io.EOF) {
+						done <- errors.Wrap(err, "read audio Stream")
+					}
+					return
+				}
 			}
-			return
+			// fill rest of the frame with zeros
+			for i := n - n%4; i < len(rawPcmFrame); i++ {
+				rawPcmFrame[i] = 0
+			}
 		}
 		// change Volume by at most smoothVolumeStep towards the TargetVolume every frame
 		if ms.Volume != ms.TargetVolume {
 			ms.Volume += atMostAbs(ms.TargetVolume-ms.Volume, smoothVolumeStep)
 		}
 		for i := range pcmFrame {
-			pcmFrame[i] *= ms.Volume
+			pcmFrame[i] = math.Float32frombits(binary.BigEndian.Uint32(rawPcmFrame[i*4:])) * ms.Volume
 		}
 		packet, err := enc.EncodeFloat32(pcmFrame, frameSize, bufferSize)
 		if err != nil {

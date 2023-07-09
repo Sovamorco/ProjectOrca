@@ -13,20 +13,26 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 )
 
 func newOrcaServer(logger *zap.SugaredLogger, session *discordgo.Session) *orcaServer {
+	stateLogger := logger.With("label", "state")
+	serverLogger := logger.With("label", "server")
 	return &orcaServer{
-		state: newState(logger, session),
+		state:  newState(stateLogger, session),
+		logger: serverLogger,
 	}
 }
 
 type orcaServer struct {
 	pb.UnimplementedOrcaServer
-	state *State
+	state  *State
+	logger *zap.SugaredLogger
 }
 
-func (o *orcaServer) Play(ctx context.Context, in *pb.PlayRequest) (*pb.PlayReply, error) {
+func (o *orcaServer) Play(_ context.Context, in *pb.PlayRequest) (*pb.PlayReply, error) {
+	o.logger.Infof("Playing \"%s\" in channel %s guild %s", in.Url, in.ChannelID, in.GuildID)
 	gs, ok := o.state.Guilds[in.GuildID]
 	if !ok {
 		gs = o.state.newGuildState(in.GuildID)
@@ -38,6 +44,43 @@ func (o *orcaServer) Play(ctx context.Context, in *pb.PlayRequest) (*pb.PlayRepl
 	return &pb.PlayReply{
 		Track: trackData,
 	}, nil
+}
+
+func (o *orcaServer) Stop(_ context.Context, in *pb.StopRequest) (*pb.StopReply, error) {
+	o.logger.Infof("Stopping playback in guild %s", in.GuildID)
+	gs, ok := o.state.Guilds[in.GuildID]
+	if !ok {
+		gs = o.state.newGuildState(in.GuildID)
+	}
+	err := gs.stop()
+	if err != nil {
+		return nil, err
+	}
+	return &pb.StopReply{}, nil
+}
+
+func (o *orcaServer) Seek(_ context.Context, in *pb.SeekRequest) (*pb.SeekReply, error) {
+	o.logger.Infof("Seeking to %.2fs in guild %s", in.Position, in.GuildID)
+	gs, ok := o.state.Guilds[in.GuildID]
+	if !ok {
+		gs = o.state.newGuildState(in.GuildID)
+	}
+	tc := time.Duration(in.Position * float32(time.Second))
+	err := gs.seek(tc)
+	if err != nil {
+		return nil, err
+	}
+	return &pb.SeekReply{}, nil
+}
+
+func (o *orcaServer) Volume(_ context.Context, in *pb.VolumeRequest) (*pb.VolumeReply, error) {
+	o.logger.Infof("Setting guild %s volume to %.2f", in.GuildID, in.Volume)
+	gs, ok := o.state.Guilds[in.GuildID]
+	if !ok {
+		gs = o.state.newGuildState(in.GuildID)
+	}
+	gs.TargetVolume = in.Volume / 100
+	return &pb.VolumeReply{}, nil
 }
 
 func main() {
