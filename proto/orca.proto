@@ -23,6 +23,7 @@ message PlayRequest {
   string guildID = 1;
   string channelID = 2;
   string url = 3;
+  int64 position = 4;
 }
 
 message PlayReply {

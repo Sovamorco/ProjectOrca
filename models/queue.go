@@ -8,6 +8,7 @@ import (
 	"github.com/joomcode/errorx"
 	"github.com/uptrace/bun"
 	"go.uber.org/zap"
+	"slices"
 	"sync"
 )
 
@@ -58,21 +59,60 @@ func (q *Queue) Restore(g *GuildState) {
 	}
 }
 
-func (q *Queue) add(ms *MusicTrack) error {
+func (q *Queue) add(ms *MusicTrack, position int) (*MusicTrack, error) {
+	retms := ms
+	// we have to very carefully sanitize position because slices.Insert can panic
 	q.Lock()
 	qlen := len(q.Tracks)
+	// if there are other tracks in the queue
 	if qlen > 0 {
-		ms.OrdKey = q.Tracks[qlen-1].OrdKey + 1
+		if position < 0 {
+			// if position is negative, interpret that as index from end
+			// e.g. -1 means put track as last, -2 means put track as before last, etc.
+			position = qlen + position + 1
+		}
+		if position >= qlen {
+			// if position is after last track - put as last
+			position = qlen
+			ms.OrdKey = q.Tracks[qlen-1].OrdKey + 1
+		} else if position == 0 {
+			// if position is at 0, put the track as the first track
+			ms.OrdKey = q.Tracks[0].OrdKey - 1
+		} else {
+			// if position is somewhere between first and last, put in-between position and position - 1
+			ms.OrdKey = (q.Tracks[position-1].OrdKey + q.Tracks[position].OrdKey) / 2
+		}
+	} else {
+		position = 0
 	}
-	q.Tracks = append(q.Tracks, ms)
+	q.Tracks = slices.Insert(q.Tracks, position, ms)
 	q.Unlock()
 	if qlen == 0 { // a.k.a if there were no tracks in the queue before we added this one
 		go q.start()
-		return nil
+		return retms, nil
+	} else if position == 0 {
+		q.Tracks[0].Lock()
+		err := q.Tracks[0].getStream()
+		q.Tracks[0].Unlock()
+		if err != nil {
+			return nil, errorx.Decorate(err, "get stream")
+		}
+		// very very bad scary things
+		q.Tracks[0].Lock()
+		q.Tracks[1].Lock()
+		//goland:noinspection GoVetCopyLock
+		*q.Tracks[0], *q.Tracks[1] = *q.Tracks[1], *q.Tracks[0]
+		q.Tracks[0], q.Tracks[1] = q.Tracks[1], q.Tracks[0]
+		retms = q.Tracks[0]
+		q.Tracks[0].Unlock()
+		q.Tracks[1].Unlock()
 	}
 	// reaching here has the same condition as modifying ms.OrdKeys
-	_, err := q.Store.NewUpdate().Model(ms).WherePK().Exec(context.TODO())
-	return err
+	_, err := q.Store.NewUpdate().Model(retms).WherePK().Exec(context.TODO())
+	if err != nil {
+		return nil, errorx.Decorate(err, "store music track")
+	}
+	return retms, nil
 }
 
 func (q *Queue) start() {

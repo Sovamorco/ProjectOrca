@@ -63,7 +63,7 @@ func (g *GuildState) gracefulShutdown() {
 
 }
 
-func (g *GuildState) PlaySound(channelID, url string) (*pb.TrackData, error) {
+func (g *GuildState) PlaySound(channelID, url string, position int) (*pb.TrackData, error) {
 	var ms *MusicTrack
 
 	if !utils.UrlRx.MatchString(url) {
@@ -82,7 +82,7 @@ func (g *GuildState) PlaySound(channelID, url string) (*pb.TrackData, error) {
 		return nil, errorx.Decorate(err, "create music track")
 	}
 
-	err = g.Queue.add(ms)
+	ms, err = g.Queue.add(ms, position)
 	if err != nil {
 		return nil, errorx.Decorate(err, "add track to Queue")
 	}

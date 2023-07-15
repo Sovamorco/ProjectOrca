@@ -246,7 +246,7 @@ func (o *orcaServer) Play(ctx context.Context, in *pb.PlayRequest) (*pb.PlayRepl
 	if err != nil {
 		return nil, errorx.Decorate(err, "get guild state")
 	}
-	trackData, err := gs.PlaySound(in.ChannelID, in.Url)
+	trackData, err := gs.PlaySound(in.ChannelID, in.Url, int(in.Position))
 	if err != nil {
 		return nil, err
 	}
@@ -380,7 +380,7 @@ func run(ctx context.Context, logger *zap.SugaredLogger) error {
 		return errorx.Decorate(err, "do migrations")
 	}
 
-	port := 8591
+	port := 8590
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
 		return errorx.Decorate(err, "listen")
