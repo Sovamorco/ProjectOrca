@@ -232,8 +232,8 @@ func (ms *MusicTrack) getStream() error {
 		"-i", ms.TrackData.Url,
 		"-filter:a", "loudnorm",
 		"-f", "f32be",
-		"-ar", fmt.Sprintf("%d", sampleRate),
-		"-ac", fmt.Sprintf("%d", channels),
+		"-ar", fmt.Sprint(sampleRate),
+		"-ac", fmt.Sprint(channels),
 		"pipe:1",
 	)
 	ffmpeg := exec.Command("ffmpeg", ffmpegArgs...)
