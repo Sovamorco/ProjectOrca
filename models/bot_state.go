@@ -10,25 +10,29 @@ import (
 )
 
 type BotState struct {
-	bun.BaseModel `bun:"table:states"`
+	bun.BaseModel `bun:"table:bots"`
 
 	Logger  *zap.SugaredLogger `bun:"-"` // do not store logger
 	Session *discordgo.Session `bun:"-"` // do not store session
 	Store   *store.Store       `bun:"-"` // do not store the store
 
-	Guilds     []*GuildState `bun:"rel:has-many,join:id=bot_id"`
-	ID         string        `bun:",pk"`
-	StateToken string
-	Token      string
+	Guilds        []*GuildState `bun:"rel:has-many,join:id=bot_id"`
+	ID            string        `bun:",pk"`
+	StateToken    string
+	Token         string
+	Locker        string
+	LockerAddress string
 }
 
-func NewState(logger *zap.SugaredLogger, token string, store *store.Store, stateToken string) (*BotState, error) {
+func NewState(logger *zap.SugaredLogger, token string, store *store.Store, stateToken, locker, lockerAddress string) (*BotState, error) {
 	s := BotState{
-		Logger:     logger,
-		Store:      store,
-		StateToken: stateToken,
-		Token:      token,
-		Guilds:     make([]*GuildState, 0),
+		Logger:        logger,
+		Store:         store,
+		Guilds:        make([]*GuildState, 0),
+		StateToken:    stateToken,
+		Token:         token,
+		Locker:        locker,
+		LockerAddress: lockerAddress,
 	}
 	session, err := s.CreateSession()
 	if err != nil {
@@ -64,8 +68,7 @@ func (s *BotState) CreateSession() (*discordgo.Session, error) {
 // Restore restores the state from database stored values
 func (s *BotState) Restore(logger *zap.SugaredLogger, store *store.Store) error {
 	logger = logger.Named("bot_state")
-	restoreLogger := logger.With("bot_id", s.ID)
-	restoreLogger.Info("Restoring bot state")
+	logger.Infow("Restoring bot state", "bot_id", s.ID)
 	s.Logger = logger
 	s.Store = store
 	session, err := s.CreateSession()
@@ -92,7 +95,7 @@ func (s *BotState) GracefulShutdown() {
 
 func (s *BotState) SetGuildState(guildID string, gs *GuildState) {
 	for i := range s.Guilds {
-		if s.Guilds[i].ID == guildID {
+		if s.Guilds[i].GuildID == guildID {
 			s.Guilds[i] = gs
 			return
 		}
@@ -102,7 +105,7 @@ func (s *BotState) SetGuildState(guildID string, gs *GuildState) {
 
 func (s *BotState) GetGuildState(guildID string) *GuildState {
 	for _, gs := range s.Guilds {
-		if gs.ID == guildID {
+		if gs.GuildID == guildID {
 			return gs
 		}
 	}

@@ -77,7 +77,7 @@ func (q *Queue) add(ms *MusicTrack) error {
 
 func (q *Queue) start() {
 	q.Logger.Info("Starting playback")
-	vc, err := q.GuildState.BotState.Session.ChannelVoiceJoin(q.GuildState.ID, q.ChannelID, false, true)
+	vc, err := q.GuildState.BotState.Session.ChannelVoiceJoin(q.GuildState.GuildID, q.ChannelID, false, true)
 	if err != nil {
 		q.Logger.Errorf("Error joining voice channel: %+v", err)
 		return

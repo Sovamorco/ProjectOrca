@@ -1,31 +1,34 @@
-CREATE TABLE IF NOT EXISTS states
+CREATE TABLE IF NOT EXISTS bots
 (
     id          VARCHAR(128) NOT NULL PRIMARY KEY,
     state_token VARCHAR(512) NOT NULL UNIQUE,
-    token       VARCHAR(512) NOT NULL UNIQUE
+    token       VARCHAR(512) NOT NULL UNIQUE,
+    locker      VARCHAR(36)  NULL
 );
 
 --bun:split
 
-CREATE TABLE IF NOT EXISTS guild_states
+CREATE TABLE IF NOT EXISTS guilds
 (
-    id            VARCHAR(128) NOT NULL PRIMARY KEY,
+    id            VARCHAR(36)  NOT NULL PRIMARY KEY,
+    guild_id      VARCHAR(128) NOT NULL,
     bot_id        VARCHAR(128) NOT NULL,
     volume        DOUBLE       NOT NULL,
     target_volume DOUBLE       NOT NULL,
 
-    FOREIGN KEY (bot_id) REFERENCES states(id)
+    UNIQUE (bot_id, guild_id),
+    FOREIGN KEY (bot_id) REFERENCES bots(id)
 );
 
 --bun:split
 
 CREATE TABLE IF NOT EXISTS queues
 (
-    id         VARCHAR(36) NOT NULL PRIMARY KEY,
-    guild_id   VARCHAR(128) NOT NULL,
-    channel_id TEXT NULL,
+    id         VARCHAR(36)  NOT NULL PRIMARY KEY,
+    guild_id   VARCHAR(36)  NOT NULL,
+    channel_id VARCHAR(128) NULL,
 
-    FOREIGN KEY (guild_id) REFERENCES guild_states (id)
+    FOREIGN KEY (guild_id) REFERENCES guilds(id)
 );
 
 --bun:split

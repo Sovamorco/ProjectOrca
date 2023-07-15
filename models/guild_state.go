@@ -6,6 +6,7 @@ import (
 	"ProjectOrca/utils"
 	"context"
 	"errors"
+	"github.com/google/uuid"
 	"github.com/joomcode/errorx"
 	"github.com/uptrace/bun"
 	"go.uber.org/zap"
@@ -13,13 +14,14 @@ import (
 )
 
 type GuildState struct {
-	bun.BaseModel `bun:"table:guild_states"`
+	bun.BaseModel `bun:"table:guilds"`
 
 	BotState *BotState          `bun:"-"` // do not store parent bot state
 	Logger   *zap.SugaredLogger `bun:"-"` // do not store logger
 	Store    *store.Store       `bun:"-"` // do not store the store
 
 	ID           string `bun:",pk"`
+	GuildID      string
 	BotID        string
 	Queue        *Queue `bun:"rel:has-one,join:id=guild_id"`
 	Volume       float32
@@ -32,7 +34,8 @@ func (s *BotState) NewGuildState(guildID string) (*GuildState, error) {
 		Logger:   s.Logger.Named("guild_state").With("guild_id", guildID),
 		Store:    s.Store,
 
-		ID:           guildID,
+		ID:           uuid.New().String(),
+		GuildID:      guildID,
 		BotID:        s.ID,
 		Volume:       1,
 		TargetVolume: 1,
@@ -46,7 +49,7 @@ func (s *BotState) NewGuildState(guildID string) (*GuildState, error) {
 }
 
 func (g *GuildState) Restore(s *BotState) {
-	logger := s.Logger.Named("guild_state").With("guild_id", g.ID)
+	logger := s.Logger.Named("guild_state").With("guild_id", g.GuildID)
 	logger.Info("Restoring guild state")
 	g.BotState = s
 	g.Logger = logger
@@ -79,7 +82,7 @@ func (g *GuildState) PlaySound(channelID, url string) (*pb.TrackData, error) {
 		return nil, errorx.Decorate(err, "create music track")
 	}
 
-	g.Queue.add(ms)
+	err = g.Queue.add(ms)
 	if err != nil {
 		return nil, errorx.Decorate(err, "add track to Queue")
 	}

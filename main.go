@@ -7,53 +7,107 @@ import (
 	"ProjectOrca/store"
 	"ProjectOrca/utils"
 	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"github.com/golang/protobuf/proto"
+	"github.com/google/uuid"
 	"github.com/joomcode/errorx"
+	"github.com/redis/go-redis/v9"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/migrate"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"net"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 )
 
-const MigrationsTimeout = time.Second * 300
+const (
+	MigrationsTimeout   = time.Second * 300
+	DeathrattlesChannel = "deathrattles"
+)
 
-func newOrcaServer(logger *zap.SugaredLogger, st *store.Store) *orcaServer {
+type DeathrattleMessage struct {
+	Deceased string
+}
+
+func newOrcaServer(logger *zap.SugaredLogger, st *store.Store, address string) *orcaServer {
 	serverLogger := logger.Named("server")
 	return &orcaServer{
-		states: make(map[string]*models.BotState),
-		logger: serverLogger,
-		store:  st,
+		id:      uuid.New().String(),
+		address: address,
+		states:  make(map[string]*models.BotState),
+		logger:  serverLogger,
+		store:   st,
 	}
 }
 
 type orcaServer struct {
 	pb.UnimplementedOrcaServer
-	states map[string]*models.BotState
-	logger *zap.SugaredLogger
-	store  *store.Store
+
+	id      string
+	address string
+	states  map[string]*models.BotState
+	logger  *zap.SugaredLogger
+	store   *store.Store
 }
 
 func (o *orcaServer) gracefulShutdown() {
 	for _, state := range o.states {
 		state.GracefulShutdown()
 	}
+	_, err := o.store.
+		NewUpdate().
+		Model((*models.BotState)(nil)).
+		Where("locker = ?", o.id).
+		Set("locker = NULL").
+		Set("locker_address = NULL").
+		Exec(context.TODO())
+	if err != nil {
+		o.logger.Errorf("Error unlocking bots: %+v", err)
+	}
+
+	o.store.Unsubscribe()
+	b, err := json.Marshal(DeathrattleMessage{
+		Deceased: o.id,
+	})
+	if err != nil {
+		o.logger.Errorf("Error marshalling deathrattle: %+v", err)
+	} else {
+		err = o.store.Publish(context.TODO(), DeathrattlesChannel, b).Err()
+		if err != nil {
+			o.logger.Errorf("Error publishing deathrattle: %+v", err)
+		}
+	}
 	o.store.GracefulShutdown()
 }
 
 func (o *orcaServer) initFromStore(ctx context.Context) error {
+	_, err := o.store.
+		NewUpdate().
+		Model((*models.BotState)(nil)).
+		Where("locker IS NULL").
+		Set("locker = ?", o.id).
+		Set("locker_address = ?", o.address).
+		Exec(ctx)
+	if err != nil {
+		return errorx.Decorate(err, "lock states")
+	}
 	states := make([]*models.BotState, 0)
-	err := o.store.
+	err = o.store.
 		NewSelect().
 		Model(&states).
+		Where("locker = ?", o.id).
 		Relation("Guilds").
 		Relation("Guilds.Queue").
 		Relation("Guilds.Queue.Tracks", func(q *bun.SelectQuery) *bun.SelectQuery {
@@ -64,6 +118,10 @@ func (o *orcaServer) initFromStore(ctx context.Context) error {
 		return errorx.Decorate(err, "list bot states")
 	}
 	for _, state := range states {
+		if _, ok := o.states[state.ID]; ok {
+			// state already controlled, no need to init
+			continue
+		}
 		err = state.Restore(o.logger, o.store)
 		if err != nil {
 			return errorx.Decorate(err, "restore state")
@@ -75,6 +133,7 @@ func (o *orcaServer) initFromStore(ctx context.Context) error {
 
 func (o *orcaServer) authLogInterceptor(ctx context.Context, req any, serverInfo *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp any, err error) {
 	o.logger.Debugf("Request to %s", serverInfo.FullMethod)
+	ctx = context.WithValue(ctx, "full_method", serverInfo.FullMethod)
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		o.logger.Debug("missing metadata")
@@ -100,15 +159,33 @@ func (o *orcaServer) authLogInterceptor(ctx context.Context, req any, serverInfo
 		}
 		return res, err
 	}
-	state, ok := o.states[botID]
-	if !ok {
-		o.logger.Debug("not registered")
-		return nil, status.Error(codes.Unauthenticated, "not registered")
+
+	state := new(models.BotState)
+	state.ID = botID
+	err = o.store.NewSelect().Model(state).WherePK().Scan(ctx)
+	if err != nil {
+		if errors.As(err, &sql.ErrNoRows) {
+			o.logger.Debug("not registered")
+			return nil, status.Error(codes.Unauthenticated, "not registered")
+		}
+		o.logger.Errorf("Error getting state from store: %+v", err)
+		return nil, status.Error(codes.Internal, "internal error")
 	}
+
 	if state.StateToken != token {
 		o.logger.Debug("invalid token")
 		return nil, status.Error(codes.Unauthenticated, "invalid token")
 	}
+
+	if state.Locker != o.id {
+		res, err := o.forwardRequest(ctx, serverInfo.FullMethod, state.LockerAddress, req)
+		if err != nil {
+			o.logger.Debugf("Returning error: %+v", err)
+		}
+		return res, err
+	}
+
+	state = o.states[botID]
 	res, err := handler(context.WithValue(ctx, "state", state), req)
 	if err != nil {
 		o.logger.Debugf("Returning error: %+v", err)
@@ -123,26 +200,40 @@ func (o *orcaServer) Register(ctx context.Context, in *pb.RegisterRequest) (*pb.
 	if err != nil {
 		return nil, err
 	}
-	state, ok := o.states[botID]
-	if ok {
-		o.logger.Infof("Bot %s already registered, reregestering", botID)
-		if in.Token != state.Token {
-			return nil, status.Error(codes.Unauthenticated, "invalid token")
+	state := new(models.BotState)
+	state.ID = botID
+	err = o.store.NewSelect().Model(state).WherePK().Scan(ctx)
+	if err != nil {
+		if !errors.As(err, &sql.ErrNoRows) {
+			o.logger.Errorf("Error getting state from store: %+v", err)
+			return nil, status.Error(codes.Internal, "internal error")
 		}
-		state.StateToken = newToken
-		_, err = o.store.NewUpdate().Model(state).WherePK().Exec(ctx)
+		state, err = models.NewState(o.logger, in.Token, o.store, newToken, o.id, o.address)
 		if err != nil {
-			return nil, errorx.Decorate(err, "store new token")
+			return nil, errorx.Decorate(err, "create state")
 		}
+		o.states[botID] = state
 		return &pb.RegisterReply{
 			Token: newToken,
 		}, nil
 	}
-	state, err = models.NewState(o.logger, in.Token, o.store, newToken)
-	if err != nil {
-		return nil, errorx.Decorate(err, "create state")
+	if state.Locker != o.id {
+		repl, err := o.forwardRequest(ctx, ctx.Value("full_method").(string), state.LockerAddress, in)
+		if repl == nil {
+			return nil, err
+		}
+		return repl.(*pb.RegisterReply), err
 	}
-	o.states[botID] = state
+	state = o.states[state.ID]
+	o.logger.Infof("Bot %s already registered, reregestering", botID)
+	if in.Token != state.Token {
+		return nil, status.Error(codes.Unauthenticated, "invalid token")
+	}
+	state.StateToken = newToken
+	_, err = o.store.NewUpdate().Model(state).WherePK().Exec(ctx)
+	if err != nil {
+		return nil, errorx.Decorate(err, "store new token")
+	}
 	return &pb.RegisterReply{
 		Token: newToken,
 	}, nil
@@ -266,11 +357,19 @@ func doMigrate(ctx context.Context, logger *zap.SugaredLogger, db *bun.DB) error
 
 func run(ctx context.Context, logger *zap.SugaredLogger) error {
 	st, err := store.NewStore(logger, &store.Config{
-		Host:     "127.0.0.1",
-		Port:     3306,
-		User:     "root",
-		Password: "local",
-		DB:       "orca",
+		DB: store.DBConfig{
+			Host:     "127.0.0.1",
+			Port:     3306,
+			User:     "root",
+			Password: "local",
+			DB:       "orca",
+		},
+		Broker: store.RedisConfig{
+			Host:  "127.0.0.1",
+			Port:  6379,
+			Token: "local",
+			DB:    0,
+		},
 	})
 	if err != nil {
 		return errorx.Decorate(err, "create store")
@@ -281,16 +380,24 @@ func run(ctx context.Context, logger *zap.SugaredLogger) error {
 		return errorx.Decorate(err, "do migrations")
 	}
 
-	port := 8590
+	port := 8591
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
 		return errorx.Decorate(err, "listen")
 	}
-	orca := newOrcaServer(logger, st)
+	localAddr, err := getLocalAddress("127.0.0.0", port)
+	if err != nil {
+		return errorx.Decorate(err, "get local address")
+	}
+	orca := newOrcaServer(logger, st, localAddr)
 	err = orca.initFromStore(ctx)
 	if err != nil {
 		return errorx.Decorate(err, "init from store")
 	}
+
+	ps := orca.store.Subscribe(ctx, DeathrattlesChannel)
+	go orca.handleDeathrattle(ps.Channel())
+
 	grpcServer := grpc.NewServer(
 		grpc.UnaryInterceptor(orca.authLogInterceptor),
 	)
@@ -315,4 +422,79 @@ func run(ctx context.Context, logger *zap.SugaredLogger) error {
 		logger.Infof("Exiting with signal %v", sig)
 		return nil
 	}
+}
+
+func (o *orcaServer) forwardRequest(ctx context.Context, call, recip string, req any) (any, error) {
+	o.logger.Debugf("Forwarding request %s to %s", call, recip)
+	conn, err := grpc.Dial(
+		recip,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		return nil, errorx.Decorate(err, "connect to recipient")
+	}
+	md, ok := metadata.FromIncomingContext(ctx)
+	if ok {
+		ctx = metadata.NewOutgoingContext(ctx, md)
+	}
+	var res proto.Message
+	switch req.(type) {
+	case *pb.PlayRequest:
+		res = new(pb.PlayReply)
+	case *pb.RegisterRequest:
+		res = new(pb.RegisterReply)
+	case *pb.SeekRequest:
+		res = new(pb.SeekReply)
+	case *pb.SkipRequest:
+		res = new(pb.SkipReply)
+	case *pb.StopRequest:
+		res = new(pb.StopReply)
+	case *pb.VolumeRequest:
+		res = new(pb.VolumeReply)
+	}
+	err = conn.Invoke(ctx, call, req, res)
+	return res, err
+}
+
+func (o *orcaServer) handleDeathrattle(ch <-chan *redis.Message) {
+	logger := o.logger.Named("sub_deathrattles")
+	var wg sync.WaitGroup
+
+	for msg := range ch {
+		msg := msg
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+			logger.Infof("Received deathrattle: %s", msg.Payload)
+			dm := new(DeathrattleMessage)
+			err := json.Unmarshal([]byte(msg.Payload), dm)
+			if err != nil {
+				logger.Errorf("Error unmarshalling deathrattle: %+v", err)
+				return
+			}
+			o.logger.Infof("Handling deathrattle from %s", dm.Deceased)
+			err = o.initFromStore(context.TODO())
+			if err != nil {
+				logger.Errorf("Error reinitializing after deathrattle: %+v", err)
+			}
+		}()
+	}
+
+	wg.Wait()
+}
+
+// getLocalAddress gets the local address from specific network with port
+func getLocalAddress(network string, port int) (string, error) {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return "", errorx.Decorate(err, "get interface addresses")
+	}
+	for _, addr := range addrs {
+		ipNet, ok := addr.(*net.IPNet)
+		if ok && ipNet.IP.Mask(ipNet.Mask).String() == network {
+			return fmt.Sprintf("%s:%d", ipNet.IP.String(), port), nil
+		}
+	}
+	return "", errors.New("could not get address")
 }

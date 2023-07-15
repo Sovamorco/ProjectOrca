@@ -198,6 +198,10 @@ func (ms *MusicTrack) getStreamUrl() error {
 		return errorx.Decorate(err, "get stream url")
 	}
 	ms.TrackData.Url = strings.TrimSpace(string(urlB))
+	_, err = ms.Store.NewUpdate().Model(ms).WherePK().Exec(context.TODO())
+	if err != nil {
+		return errorx.Decorate(err, "store track")
+	}
 	return nil
 }
 
