@@ -66,7 +66,7 @@ func NewStore(logger *zap.SugaredLogger, config *Config) (*Store, error) {
 		logger:     logger.Named("store"),
 		DB:         db,
 		Client:     client,
-		unsubFuncs: make([]func(ctx context.Context), 1),
+		unsubFuncs: make([]func(ctx context.Context), 0),
 	}, nil
 }
 

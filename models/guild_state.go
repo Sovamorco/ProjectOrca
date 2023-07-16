@@ -142,7 +142,7 @@ func (g *GuildState) Seek(pos time.Duration) error {
 	}
 
 	curr := g.Queue.Tracks[0]
-	if curr.Live {
+	if curr.TrackData.Live {
 		return ErrSeekLive
 	}
 

@@ -34,6 +34,7 @@ message TrackData {
   string originalURL = 2;
   string url = 3;
   map<string, string> httpHeaders = 4;
+  bool live = 5;
 }
 
 message SkipRequest {

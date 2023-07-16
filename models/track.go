@@ -44,6 +44,7 @@ type YTDLData struct {
 	Title       string            `json:"title"`
 	Channel     string            `json:"channel"`
 	OriginalURL string            `json:"original_url"`
+	IsLive      bool              `json:"is_live"`
 	URL         string            `json:"url"`
 	HTTPHeaders map[string]string `json:"http_headers"`
 }
@@ -59,6 +60,7 @@ func (td *YTDLData) toProto() *pb.TrackData {
 		OriginalURL: td.OriginalURL,
 		Url:         td.URL,
 		HttpHeaders: td.HTTPHeaders,
+		Live:        td.IsLive,
 	}
 }
 
@@ -78,7 +80,6 @@ type MusicTrack struct {
 	Pos       time.Duration
 	TrackData *pb.TrackData `bun:"type:json"`
 	OrdKey    float64
-	Live      bool
 }
 
 func (q *Queue) newMusicTrack(ctx context.Context, url string) (*MusicTrack, error) {
@@ -107,7 +108,6 @@ func (q *Queue) newMusicTrackEmpty() *MusicTrack {
 		QueueID: q.ID,
 		Queue:   q,
 		Pos:     0,
-		Live:    false,
 	}
 }
 
@@ -251,10 +251,7 @@ func (ms *MusicTrack) getStream() error {
 		"-reconnect_delay_max", "2",
 	}
 
-	ms.Live = true
-
-	if !strings.Contains(ms.TrackData.Url, ".m3u8") {
-		ms.Live = false
+	if !ms.TrackData.Live {
 		ffmpegArgs = append(ffmpegArgs,
 			"-reconnect_at_eof", "1",
 			"-ss", fmt.Sprintf("%f", ms.Pos.Seconds()),
@@ -394,7 +391,9 @@ func (ms *MusicTrack) streamLoop() error {
 		case ms.Queue.VC.OpusSend <- packet:
 		}
 
-		ms.Pos += frameSizeMs * time.Millisecond
+		if !ms.TrackData.Live {
+			ms.Pos += frameSizeMs * time.Millisecond
+		}
 	}
 }
 

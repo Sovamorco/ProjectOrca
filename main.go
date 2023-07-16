@@ -115,7 +115,7 @@ func (o *orcaServer) initFromStore(ctx context.Context) error {
 	_, err := o.store.
 		NewUpdate().
 		Model((*models.BotState)(nil)).
-		Where("locker IS NULL").
+		Where("locker IS NULL OR locker_address = ?", o.address).
 		Set("locker = ?", o.id).
 		Set("locker_address = ?", o.address).
 		Exec(ctx)
@@ -457,6 +457,10 @@ func (o *orcaServer) Seek(ctx context.Context, in *pb.SeekRequest) (*pb.SeekRepl
 
 	err = gs.Seek(tc)
 	if err != nil {
+		if errors.Is(err, models.ErrSeekLive) {
+			return nil, status.Error(codes.InvalidArgument, "cannot seek live")
+		}
+
 		o.logger.Errorf("Error seeking: %+v", err)
 
 		return nil, ErrInternal
