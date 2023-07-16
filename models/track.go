@@ -78,6 +78,7 @@ type MusicTrack struct {
 	Pos       time.Duration
 	TrackData *pb.TrackData `bun:"type:json"`
 	OrdKey    float64
+	Live      bool
 }
 
 func (q *Queue) newMusicTrack(ctx context.Context, url string) (*MusicTrack, error) {
@@ -106,6 +107,7 @@ func (q *Queue) newMusicTrackEmpty() *MusicTrack {
 		QueueID: q.ID,
 		Queue:   q,
 		Pos:     0,
+		Live:    false,
 	}
 }
 
@@ -249,7 +251,10 @@ func (ms *MusicTrack) getStream() error {
 		"-reconnect_delay_max", "2",
 	}
 
+	ms.Live = true
+
 	if !strings.Contains(ms.TrackData.Url, ".m3u8") {
+		ms.Live = false
 		ffmpegArgs = append(ffmpegArgs,
 			"-reconnect_at_eof", "1",
 			"-ss", fmt.Sprintf("%f", ms.Pos.Seconds()),

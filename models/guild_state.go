@@ -29,7 +29,10 @@ type GuildState struct {
 	Queue   *Queue `bun:"rel:has-one,join:id=guild_id"`
 }
 
-var ErrNotPlaying = errors.New("nothing playing")
+var (
+	ErrNotPlaying = errors.New("nothing playing")
+	ErrSeekLive   = errors.New("cannot seek live track")
+)
 
 func (s *BotState) NewGuildState(ctx context.Context, guildID string) (*GuildState, error) {
 	gs := &GuildState{ //nolint:exhaustruct
@@ -138,7 +141,12 @@ func (g *GuildState) Seek(pos time.Duration) error {
 		return ErrNotPlaying
 	}
 
-	err := g.Queue.Tracks[0].Seek(pos)
+	curr := g.Queue.Tracks[0]
+	if curr.Live {
+		return ErrSeekLive
+	}
+
+	err := curr.Seek(pos)
 	if err != nil {
 		return errorx.Decorate(err, "seek")
 	}
