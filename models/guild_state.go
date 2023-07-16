@@ -102,7 +102,9 @@ func (g *GuildState) Stop() error {
 		return errors.New("Nothing playing")
 	}
 	current := g.Queue.Tracks[0]
+	g.Queue.Lock()
 	g.Queue.Tracks = nil
+	g.Queue.Unlock()
 	current.Stop <- struct{}{}
 	_, err := g.Store.NewDelete().Model((*MusicTrack)(nil)).Where("queue_id = ?", g.Queue.ID).Exec(context.TODO())
 	return err

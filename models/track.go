@@ -292,18 +292,16 @@ func (ms *MusicTrack) streamToVC(vc *discordgo.VoiceConnection, done chan error)
 		return
 	}
 
-	defer func(stream io.ReadCloser) {
-		err := stream.Close()
+	defer func() {
+		err := ms.Stream.Close()
 		if err != nil && !errors.Is(err, os.ErrClosed) {
 			ms.Logger.Errorf("Error closing Stream: %+v", err)
 		}
-	}(ms.Stream)
-	defer func(Process *os.Process) {
-		err := Process.Signal(syscall.SIGTERM)
+		err = ms.CMD.Process.Signal(syscall.SIGTERM)
 		if err != nil {
 			ms.Logger.Errorf("Error killing ffmpeg process: %+v", err)
 		}
-	}(ms.CMD.Process)
+	}()
 
 	rawPcmFrame := make([]byte, 4*frameSize)
 	pcmFrame := make([]float32, frameSize)
