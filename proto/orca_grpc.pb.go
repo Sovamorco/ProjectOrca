@@ -27,7 +27,6 @@ type OrcaClient interface {
 	Skip(ctx context.Context, in *SkipRequest, opts ...grpc.CallOption) (*SkipReply, error)
 	Stop(ctx context.Context, in *StopRequest, opts ...grpc.CallOption) (*StopReply, error)
 	Seek(ctx context.Context, in *SeekRequest, opts ...grpc.CallOption) (*SeekReply, error)
-	Volume(ctx context.Context, in *VolumeRequest, opts ...grpc.CallOption) (*VolumeReply, error)
 }
 
 type orcaClient struct {
@@ -83,15 +82,6 @@ func (c *orcaClient) Seek(ctx context.Context, in *SeekRequest, opts ...grpc.Cal
 	return out, nil
 }
 
-func (c *orcaClient) Volume(ctx context.Context, in *VolumeRequest, opts ...grpc.CallOption) (*VolumeReply, error) {
-	out := new(VolumeReply)
-	err := c.cc.Invoke(ctx, "/orca.Orca/Volume", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // OrcaServer is the server API for Orca service.
 // All implementations must embed UnimplementedOrcaServer
 // for forward compatibility
@@ -101,7 +91,6 @@ type OrcaServer interface {
 	Skip(context.Context, *SkipRequest) (*SkipReply, error)
 	Stop(context.Context, *StopRequest) (*StopReply, error)
 	Seek(context.Context, *SeekRequest) (*SeekReply, error)
-	Volume(context.Context, *VolumeRequest) (*VolumeReply, error)
 	mustEmbedUnimplementedOrcaServer()
 }
 
@@ -123,9 +112,6 @@ func (UnimplementedOrcaServer) Stop(context.Context, *StopRequest) (*StopReply, 
 }
 func (UnimplementedOrcaServer) Seek(context.Context, *SeekRequest) (*SeekReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Seek not implemented")
-}
-func (UnimplementedOrcaServer) Volume(context.Context, *VolumeRequest) (*VolumeReply, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Volume not implemented")
 }
 func (UnimplementedOrcaServer) mustEmbedUnimplementedOrcaServer() {}
 
@@ -230,24 +216,6 @@ func _Orca_Seek_Handler(srv interface{}, ctx context.Context, dec func(interface
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Orca_Volume_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(VolumeRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(OrcaServer).Volume(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/orca.Orca/Volume",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(OrcaServer).Volume(ctx, req.(*VolumeRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 // Orca_ServiceDesc is the grpc.ServiceDesc for Orca service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -274,10 +242,6 @@ var Orca_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Seek",
 			Handler:    _Orca_Seek_Handler,
-		},
-		{
-			MethodName: "Volume",
-			Handler:    _Orca_Volume_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

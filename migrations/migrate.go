@@ -2,17 +2,19 @@ package migrations
 
 import (
 	"embed"
+
+	"github.com/joomcode/errorx"
 	"github.com/uptrace/bun/migrate"
 )
 
-var (
-	//go:embed migrations
-	migrationsFS embed.FS
-	Migrations   = migrate.NewMigrations()
-)
+//go:embed migrations
+var migrationsFS embed.FS
 
-func init() {
-	if err := Migrations.Discover(migrationsFS); err != nil {
-		panic(err)
+func NewMigrations() (*migrate.Migrations, error) {
+	migrations := migrate.NewMigrations()
+	if err := migrations.Discover(migrationsFS); err != nil {
+		return nil, errorx.Decorate(err, "discover migrations")
 	}
+
+	return migrations, nil
 }

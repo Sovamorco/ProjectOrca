@@ -1,0 +1,33 @@
+linters:
+  enable-all: true
+  disable:
+  - interfacer
+  - varcheck
+  - structcheck
+  - deadcode
+  - maligned
+  - exhaustivestruct
+  - ifshort
+  - nosnakecase
+  - golint
+  - scopelint
+  - tagliatelle
+  - varnamelen
+  - depguard
+  - goimports # conflicts with gofumpt
+  - gci       # conflicts with gofumpt
+  - gofumpt   # broken, just run task fmt
+
+linters-settings:
+  ireturn:
+    allow:
+    - error
+    - stdlib
+    - generic
+
+  wrapcheck:
+    ignoreSigs:
+    - errors.New
+    - errorx.Decorate
+    - status.Error
+    - status.Errorf

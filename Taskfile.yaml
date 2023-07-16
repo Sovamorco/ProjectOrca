@@ -24,9 +24,9 @@ tasks:
     summary: |
       This task runs go fmt on whole project
       Dependencies:
-      - "go" has to be in PATH
+      - "gofumpt" - `go install mvdan.cc/gofumpt@latest`
     cmds:
-    - go fmt ./...
+    - gofumpt -l -w .
 
   lint:
     desc:    This task runs go lint tool on the whole project
@@ -35,7 +35,7 @@ tasks:
       Dependencies:
       - "golangci-lint" - (https://golangci-lint.run/usage/install/#local-installation)
     cmds:
-    - golangci-lint run -v
+    - golangci-lint run -v {{.CLI_ARGS}}
 
   proto:
     desc:    This task runs protobuf generator for proto files in proto directory

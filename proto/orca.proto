@@ -8,7 +8,6 @@ service Orca {
   rpc Skip (SkipRequest) returns (SkipReply) {}
   rpc Stop (StopRequest) returns (StopReply) {}
   rpc Seek (SeekRequest) returns (SeekReply) {}
-  rpc Volume (VolumeRequest) returns (VolumeReply) {}
 }
 
 message RegisterRequest {
@@ -55,10 +54,3 @@ message SeekRequest {
 }
 
 message SeekReply {}
-
-message VolumeRequest {
-  string guildID = 1;
-  float volume = 2;
-}
-
-message VolumeReply {}

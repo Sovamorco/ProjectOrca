@@ -4,13 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	_ "github.com/go-sql-driver/mysql"
+	"sync"
+
+	_ "github.com/go-sql-driver/mysql" // driver required for sql connection
 	"github.com/joomcode/errorx"
 	"github.com/redis/go-redis/v9"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/mysqldialect"
 	"go.uber.org/zap"
-	"sync"
 )
 
 type Config struct {
@@ -38,7 +39,7 @@ type RedisConfig struct {
 }
 
 func (r *RedisConfig) getOptions() *redis.Options {
-	return &redis.Options{
+	return &redis.Options{ //nolint:exhaustruct
 		Addr:     fmt.Sprintf("%s:%d", r.Host, r.Port),
 		Password: r.Token,
 		DB:       r.DB,
@@ -49,7 +50,7 @@ type Store struct {
 	*bun.DB
 	*redis.Client
 	logger     *zap.SugaredLogger
-	unsubFuncs []func()
+	unsubFuncs []func(ctx context.Context)
 }
 
 func NewStore(logger *zap.SugaredLogger, config *Config) (*Store, error) {
@@ -57,12 +58,15 @@ func NewStore(logger *zap.SugaredLogger, config *Config) (*Store, error) {
 	if err != nil {
 		return nil, errorx.Decorate(err, "open sql connection")
 	}
+
 	db := bun.NewDB(mysql, mysqldialect.New())
 	client := redis.NewClient(config.Broker.getOptions())
+
 	return &Store{
-		logger: logger.Named("store"),
-		DB:     db,
-		Client: client,
+		logger:     logger.Named("store"),
+		DB:         db,
+		Client:     client,
+		unsubFuncs: make([]func(ctx context.Context), 1),
 	}, nil
 }
 
@@ -71,6 +75,7 @@ func (s *Store) GracefulShutdown() {
 	if err != nil {
 		s.logger.Errorf("Error closing bun store: %+v", err)
 	}
+
 	err = s.Client.Close()
 	if err != nil {
 		s.logger.Errorf("Error closing redis client: %+v", err)
@@ -79,24 +84,29 @@ func (s *Store) GracefulShutdown() {
 
 func (s *Store) Subscribe(ctx context.Context, channels ...string) *redis.PubSub {
 	ps := s.Client.Subscribe(ctx, channels...)
-	s.unsubFuncs = append(s.unsubFuncs, func() {
-		err := ps.Unsubscribe(context.TODO(), channels...)
+	s.unsubFuncs = append(s.unsubFuncs, func(ctx context.Context) {
+		err := ps.Unsubscribe(ctx, channels...)
 		if err != nil {
 			s.logger.Errorf("Error unsubscribing from channels: %+v", err)
 		}
 	})
+
 	return ps
 }
 
-func (s *Store) Unsubscribe() {
+func (s *Store) Unsubscribe(ctx context.Context) {
 	var wg sync.WaitGroup
+
 	for _, f := range s.unsubFuncs {
-		wg.Add(1)
 		f := f
+
+		wg.Add(1)
+
 		go func() {
 			defer wg.Done()
-			f()
+			f(ctx)
 		}()
 	}
+
 	wg.Wait()
 }
