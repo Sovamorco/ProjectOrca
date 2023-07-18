@@ -444,7 +444,7 @@ func (o *orcaServer) Seek(ctx context.Context, in *pb.SeekRequest) (*pb.SeekRepl
 		return nil, err
 	}
 
-	o.logger.Infof("Seeking to %.2fs in guild %s", in.Position, in.GuildID)
+	o.logger.Infof("Seeking to %.2fs in guild %s", in.Position.AsDuration().Seconds(), in.GuildID)
 
 	gs, err := state.GetOrCreateGuildState(ctx, in.GuildID)
 	if err != nil {
@@ -453,7 +453,7 @@ func (o *orcaServer) Seek(ctx context.Context, in *pb.SeekRequest) (*pb.SeekRepl
 		return nil, ErrInternal
 	}
 
-	tc := time.Duration(in.Position * float32(time.Second))
+	tc := in.Position.AsDuration()
 
 	err = gs.Seek(tc)
 	if err != nil {
@@ -467,6 +467,50 @@ func (o *orcaServer) Seek(ctx context.Context, in *pb.SeekRequest) (*pb.SeekRepl
 	}
 
 	return &pb.SeekReply{}, nil
+}
+
+func (o *orcaServer) GetTracks(ctx context.Context, in *pb.GetTracksRequest) (*pb.GetTracksReply, error) {
+	state, err := o.getState(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	gs, err := state.GetOrCreateGuildState(ctx, in.GuildID)
+	if err != nil {
+		o.logger.Errorf("Error getting guild state: %+v", err)
+
+		return nil, ErrInternal
+	}
+
+	if gs.Queue == nil {
+		return &pb.GetTracksReply{
+			Tracks:      nil,
+			TotalTracks: 0,
+		}, nil
+	}
+
+	gs.Queue.Lock()
+
+	qlen := len(gs.Queue.Tracks)
+	// start has to be at least 0 and at most qlen
+	start := min(max(int(in.Start), 0), qlen)
+	// end has to be at least start and at most qlen
+	end := min(max(int(in.End), start), qlen)
+
+	tracks := gs.Queue.Tracks[start:end]
+
+	gs.Queue.Unlock()
+
+	res := make([]*pb.TrackData, 0, len(tracks))
+
+	for _, track := range tracks {
+		res = append(res, track.ToProto())
+	}
+
+	return &pb.GetTracksReply{
+		Tracks:      res,
+		TotalTracks: int64(qlen),
+	}, nil
 }
 
 func main() {

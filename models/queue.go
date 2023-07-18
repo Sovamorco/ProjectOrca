@@ -16,13 +16,13 @@ import (
 )
 
 type Queue struct {
-	bun.BaseModel `bun:"table:queues"`
+	bun.BaseModel `bun:"table:queues" exhaustruct:"optional"`
 
-	sync.Mutex `bun:"-"`                  // do not store mutex state
-	GuildState *GuildState                `bun:"-"` // do not store parent guild state
-	Logger     *zap.SugaredLogger         `bun:"-"` // do not store logger
-	VC         *discordgo.VoiceConnection `bun:"-"` // do not store voice connection
-	Store      *store.Store               `bun:"-"` // do not store the store
+	sync.Mutex `bun:"-" exhaustruct:"optional"` // do not store mutex state
+	GuildState *GuildState                      `bun:"-"` // do not store parent guild state
+	Logger     *zap.SugaredLogger               `bun:"-"` // do not store logger
+	VC         *discordgo.VoiceConnection       `bun:"-"` // do not store voice connection
+	Store      *store.Store                     `bun:"-"` // do not store the store
 
 	ID        string `bun:",pk"`
 	GuildID   string
@@ -31,9 +31,10 @@ type Queue struct {
 }
 
 func (g *GuildState) newQueue(ctx context.Context, channelID string) error {
-	g.Queue = &Queue{ //nolint:exhaustruct
+	g.Queue = &Queue{
 		GuildState: g,
 		Logger:     g.Logger.Named("queue"),
+		VC:         nil,
 		Store:      g.Store,
 
 		ID:        uuid.New().String(),
@@ -72,9 +73,11 @@ func (q *Queue) add(ctx context.Context, ms *MusicTrack, position int) (*MusicTr
 	retms := ms
 
 	q.Lock()
+
 	qlen := len(q.Tracks)
 	position = q.choosePosition(position, qlen, ms)
 	q.Tracks = slices.Insert(q.Tracks, position, ms)
+
 	q.Unlock()
 
 	if qlen == 0 { // a.k.a if there were no tracks in the queue before we added this one
@@ -132,9 +135,20 @@ func (q *Queue) start(ctx context.Context) {
 		}
 	}(vc)
 
-	for len(q.Tracks) > 0 {
+	for {
 		done := make(chan error, 1)
+
+		q.Lock()
+
+		if len(q.Tracks) > 0 {
+			q.Unlock()
+
+			break
+		}
+
 		curr := q.Tracks[0]
+
+		q.Unlock()
 
 		curr.streamToVC(ctx, done)
 
@@ -149,12 +163,16 @@ func (q *Queue) start(ctx context.Context) {
 		}
 
 		// check before indexing because of stop call
+		q.Lock()
+
 		if len(q.Tracks) < 1 {
+			q.Unlock()
+
 			break
 		}
 
-		q.Lock()
 		q.Tracks = q.Tracks[1:]
+
 		q.Unlock()
 	}
 }

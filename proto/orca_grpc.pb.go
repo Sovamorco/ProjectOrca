@@ -27,6 +27,7 @@ type OrcaClient interface {
 	Skip(ctx context.Context, in *SkipRequest, opts ...grpc.CallOption) (*SkipReply, error)
 	Stop(ctx context.Context, in *StopRequest, opts ...grpc.CallOption) (*StopReply, error)
 	Seek(ctx context.Context, in *SeekRequest, opts ...grpc.CallOption) (*SeekReply, error)
+	GetTracks(ctx context.Context, in *GetTracksRequest, opts ...grpc.CallOption) (*GetTracksReply, error)
 }
 
 type orcaClient struct {
@@ -82,6 +83,15 @@ func (c *orcaClient) Seek(ctx context.Context, in *SeekRequest, opts ...grpc.Cal
 	return out, nil
 }
 
+func (c *orcaClient) GetTracks(ctx context.Context, in *GetTracksRequest, opts ...grpc.CallOption) (*GetTracksReply, error) {
+	out := new(GetTracksReply)
+	err := c.cc.Invoke(ctx, "/orca.Orca/GetTracks", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // OrcaServer is the server API for Orca service.
 // All implementations must embed UnimplementedOrcaServer
 // for forward compatibility
@@ -91,6 +101,7 @@ type OrcaServer interface {
 	Skip(context.Context, *SkipRequest) (*SkipReply, error)
 	Stop(context.Context, *StopRequest) (*StopReply, error)
 	Seek(context.Context, *SeekRequest) (*SeekReply, error)
+	GetTracks(context.Context, *GetTracksRequest) (*GetTracksReply, error)
 	mustEmbedUnimplementedOrcaServer()
 }
 
@@ -112,6 +123,9 @@ func (UnimplementedOrcaServer) Stop(context.Context, *StopRequest) (*StopReply, 
 }
 func (UnimplementedOrcaServer) Seek(context.Context, *SeekRequest) (*SeekReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Seek not implemented")
+}
+func (UnimplementedOrcaServer) GetTracks(context.Context, *GetTracksRequest) (*GetTracksReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetTracks not implemented")
 }
 func (UnimplementedOrcaServer) mustEmbedUnimplementedOrcaServer() {}
 
@@ -216,6 +230,24 @@ func _Orca_Seek_Handler(srv interface{}, ctx context.Context, dec func(interface
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Orca_GetTracks_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetTracksRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrcaServer).GetTracks(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/orca.Orca/GetTracks",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrcaServer).GetTracks(ctx, req.(*GetTracksRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Orca_ServiceDesc is the grpc.ServiceDesc for Orca service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -242,6 +274,10 @@ var Orca_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Seek",
 			Handler:    _Orca_Seek_Handler,
+		},
+		{
+			MethodName: "GetTracks",
+			Handler:    _Orca_GetTracks_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"time"
 
+	"google.golang.org/protobuf/types/known/durationpb"
+
 	"ProjectOrca/store"
 	"ProjectOrca/utils"
 
@@ -32,7 +34,8 @@ const (
 	bitrate     = 64000 // bits/s
 	packetSize  = bitrate * frameSizeMs / 1000 / 8
 
-	bufferPackets = 10
+	bufferMilliseconds = 500
+	bufferPackets      = bufferMilliseconds / frameSizeMs
 
 	storeInterval = 5 * time.Second
 )
@@ -45,6 +48,7 @@ type YTDLData struct {
 	Channel     string            `json:"channel"`
 	OriginalURL string            `json:"original_url"`
 	IsLive      bool              `json:"is_live"`
+	Duration    float64           `json:"duration"`
 	URL         string            `json:"url"`
 	HTTPHeaders map[string]string `json:"http_headers"`
 }
@@ -54,32 +58,27 @@ type YTDLSearchData struct {
 	Entries []YTDLData `json:"entries"`
 }
 
-func (td *YTDLData) toProto() *pb.TrackData {
-	return &pb.TrackData{
-		Title:       td.Title,
-		OriginalURL: td.OriginalURL,
-		Url:         td.URL,
-		HttpHeaders: td.HTTPHeaders,
-		Live:        td.IsLive,
-	}
-}
-
 type MusicTrack struct {
-	bun.BaseModel `bun:"table:tracks"`
+	bun.BaseModel `bun:"table:tracks" exhaustruct:"optional"`
 
-	sync.Mutex `bun:"-"`          // do not store mutex state
-	Queue      *Queue             `bun:"-"` // do not store parent queue
-	Logger     *zap.SugaredLogger `bun:"-"` // do not store logger
-	CMD        *exec.Cmd          `bun:"-"` // do not store cmd
-	Stream     io.ReadCloser      `bun:"-"` // do not store stream
-	Stop       chan struct{}      `bun:"-"` // do not store channel
-	Store      *store.Store       `bun:"-"` // do not store the store
+	sync.Mutex `bun:"-" exhaustruct:"optional"` // do not store mutex state
+	Queue      *Queue                           `bun:"-"` // do not store parent queue
+	Logger     *zap.SugaredLogger               `bun:"-"` // do not store logger
+	CMD        *exec.Cmd                        `bun:"-"` // do not store cmd
+	Stream     io.ReadCloser                    `bun:"-"` // do not store stream
+	Stop       chan struct{}                    `bun:"-"` // do not store channel
+	Store      *store.Store                     `bun:"-"` // do not store the store
 
-	ID        string `bun:",pk"`
-	QueueID   string
-	Pos       time.Duration
-	TrackData *pb.TrackData `bun:"type:json"`
-	OrdKey    float64
+	ID          string `bun:",pk"`
+	QueueID     string
+	Pos         time.Duration
+	Duration    time.Duration
+	OrdKey      float64
+	Title       string
+	OriginalURL string
+	URL         string
+	HTTPHeaders map[string]string
+	Live        bool
 }
 
 func (q *Queue) newMusicTrack(ctx context.Context, url string) (*MusicTrack, error) {
@@ -99,20 +98,28 @@ func (q *Queue) newMusicTrack(ctx context.Context, url string) (*MusicTrack, err
 }
 
 func (q *Queue) newMusicTrackEmpty() *MusicTrack {
-	return &MusicTrack{ //nolint:exhaustruct
-		Logger: q.Logger.Named("track"),
-		Stop:   make(chan struct{}),
-		Store:  q.Store,
-
-		ID:      uuid.New().String(),
-		QueueID: q.ID,
-		Queue:   q,
-		Pos:     0,
+	return &MusicTrack{
+		Queue:       q,
+		Logger:      q.Logger.Named("track"),
+		CMD:         nil,
+		Stream:      nil,
+		Stop:        make(chan struct{}),
+		Store:       q.Store,
+		ID:          uuid.New().String(),
+		QueueID:     q.ID,
+		Pos:         0,
+		Duration:    0,
+		OrdKey:      0,
+		Title:       "",
+		OriginalURL: "",
+		URL:         "",
+		HTTPHeaders: nil,
+		Live:        false,
 	}
 }
 
 func (ms *MusicTrack) Restore(q *Queue) {
-	logger := q.Logger.Named("track").With("track", ms.TrackData.Title)
+	logger := q.Logger.Named("track").With("track", ms.Title)
 
 	logger.Info("Restoring track")
 
@@ -120,6 +127,17 @@ func (ms *MusicTrack) Restore(q *Queue) {
 	ms.Logger = logger
 	ms.Stop = make(chan struct{})
 	ms.Store = ms.Queue.Store
+}
+
+func (ms *MusicTrack) ToProto() *pb.TrackData {
+	return &pb.TrackData{
+		Title:       ms.Title,
+		OriginalURL: ms.OriginalURL,
+		Url:         ms.URL,
+		Live:        ms.Live,
+		Position:    durationpb.New(ms.Pos),
+		Duration:    durationpb.New(ms.Duration),
+	}
 }
 
 func (ms *MusicTrack) Seek(pos time.Duration) error {
@@ -209,19 +227,24 @@ func (ms *MusicTrack) getTrackData(url string) error {
 		ad = vd.Entries[0]
 	}
 
-	ms.TrackData = ad.toProto()
-	ms.Logger = ms.Logger.With("track", ms.TrackData.Title)
+	ms.Title = ad.Title
+	ms.OriginalURL = ad.OriginalURL
+	ms.URL = ad.URL
+	ms.HTTPHeaders = ad.HTTPHeaders
+	ms.Live = ad.IsLive
+	ms.Duration = time.Duration(ad.Duration * float64(time.Second))
+	ms.Logger = ms.Logger.With("track", ms.Title)
 
 	return nil
 }
 
 func (ms *MusicTrack) getStreamURL(ctx context.Context) error {
-	urlB, err := getYTDLPOutput(ms.Logger, "--get-url", ms.TrackData.OriginalURL)
+	urlB, err := getYTDLPOutput(ms.Logger, "--get-url", ms.OriginalURL)
 	if err != nil {
 		return errorx.Decorate(err, "get stream url")
 	}
 
-	ms.TrackData.Url = strings.TrimSpace(string(urlB))
+	ms.URL = strings.TrimSpace(string(urlB))
 
 	_, err = ms.Store.NewUpdate().Model(ms).WherePK().Exec(ctx)
 	if err != nil {
@@ -232,9 +255,9 @@ func (ms *MusicTrack) getStreamURL(ctx context.Context) error {
 }
 
 func (ms *MusicTrack) getFormattedHeaders() string {
-	fmtd := make([]string, 0, len(ms.TrackData.HttpHeaders))
+	fmtd := make([]string, 0, len(ms.HTTPHeaders))
 
-	for k, v := range ms.TrackData.HttpHeaders {
+	for k, v := range ms.HTTPHeaders {
 		fmtd = append(fmtd, fmt.Sprintf("%s:%s", k, v))
 	}
 
@@ -251,7 +274,7 @@ func (ms *MusicTrack) getStream() error {
 		"-reconnect_delay_max", "2",
 	}
 
-	if !ms.TrackData.Live {
+	if !ms.Live {
 		ffmpegArgs = append(ffmpegArgs,
 			"-reconnect_at_eof", "1",
 			"-ss", fmt.Sprintf("%f", ms.Pos.Seconds()),
@@ -259,9 +282,9 @@ func (ms *MusicTrack) getStream() error {
 	}
 
 	ffmpegArgs = append(ffmpegArgs,
-		"-i", ms.TrackData.Url,
+		"-i", ms.URL,
 		"-map", "0:a",
-		"-filter:a", "loudnorm",
+		// "-filter:a", "dynaudnorm=p=0.9:r=0.5", // makes metal sound dogshit :( TODO: revisit
 		"-acodec", "libopus",
 		"-f", "data",
 		"-ar", fmt.Sprint(sampleRate),
@@ -391,7 +414,7 @@ func (ms *MusicTrack) streamLoop() error {
 		case ms.Queue.VC.OpusSend <- packet:
 		}
 
-		if !ms.TrackData.Live {
+		if !ms.Live {
 			ms.Pos += frameSizeMs * time.Millisecond
 		}
 	}

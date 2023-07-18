@@ -17,7 +17,7 @@ import (
 )
 
 type GuildState struct {
-	bun.BaseModel `bun:"table:guilds"`
+	bun.BaseModel `bun:"table:guilds" exhaustruct:"optional"`
 
 	BotState *BotState          `bun:"-"` // do not store parent bot state
 	Logger   *zap.SugaredLogger `bun:"-"` // do not store logger
@@ -35,7 +35,13 @@ var (
 )
 
 func (s *BotState) NewGuildState(ctx context.Context, guildID string) (*GuildState, error) {
-	gs := &GuildState{ //nolint:exhaustruct
+	// basically check if bot is in guild
+	_, err := s.Session.State.Guild(guildID)
+	if err != nil {
+		return nil, errorx.Decorate(err, "get guild from state")
+	}
+
+	gs := &GuildState{
 		BotState: s,
 		Logger:   s.Logger.Named("guild_state").With("guild_id", guildID),
 		Store:    s.Store,
@@ -43,9 +49,10 @@ func (s *BotState) NewGuildState(ctx context.Context, guildID string) (*GuildSta
 		ID:      uuid.New().String(),
 		GuildID: guildID,
 		BotID:   s.ID,
+		Queue:   nil,
 	}
 
-	_, err := s.Store.NewInsert().Model(gs).Exec(ctx)
+	_, err = s.Store.NewInsert().Model(gs).Exec(ctx)
 	if err != nil {
 		return nil, errorx.Decorate(err, "store guild state")
 	}
@@ -102,28 +109,39 @@ func (g *GuildState) PlayTrack(ctx context.Context, channelID, url string, posit
 		return nil, errorx.Decorate(err, "add track to Queue")
 	}
 
-	return ms.TrackData, nil
+	return ms.ToProto(), nil
 }
 
 func (g *GuildState) Skip() error {
+	g.Queue.Lock()
+
 	if len(g.Queue.Tracks) < 1 {
+		g.Queue.Unlock()
+
 		return ErrNotPlaying
 	}
 
-	g.Queue.Tracks[0].Stop <- struct{}{}
+	curr := g.Queue.Tracks[0]
+
+	g.Queue.Unlock()
+
+	curr.Stop <- struct{}{}
 
 	return nil
 }
 
 func (g *GuildState) Stop(ctx context.Context) error {
+	g.Queue.Lock()
+
 	if len(g.Queue.Tracks) < 1 {
+		g.Queue.Unlock()
+
 		return ErrNotPlaying
 	}
 
 	current := g.Queue.Tracks[0]
-
-	g.Queue.Lock()
 	g.Queue.Tracks = nil
+
 	g.Queue.Unlock()
 
 	current.Stop <- struct{}{}
@@ -137,12 +155,19 @@ func (g *GuildState) Stop(ctx context.Context) error {
 }
 
 func (g *GuildState) Seek(pos time.Duration) error {
+	g.Queue.Lock()
+
 	if len(g.Queue.Tracks) < 1 {
+		g.Queue.Unlock()
+
 		return ErrNotPlaying
 	}
 
 	curr := g.Queue.Tracks[0]
-	if curr.TrackData.Live {
+
+	g.Queue.Unlock()
+
+	if curr.Live {
 		return ErrSeekLive
 	}
 

@@ -12,7 +12,7 @@ import (
 )
 
 type BotState struct {
-	bun.BaseModel `bun:"table:bots"`
+	bun.BaseModel `bun:"table:bots" exhaustruct:"optional"`
 
 	Logger  *zap.SugaredLogger `bun:"-"` // do not store logger
 	Session *discordgo.Session `bun:"-"` // do not store session
@@ -35,10 +35,12 @@ func NewState(
 	locker,
 	lockerAddress string,
 ) (*BotState, error) {
-	s := BotState{ //nolint:exhaustruct
+	s := BotState{
 		Logger:        logger,
+		Session:       nil,
 		Store:         store,
 		Guilds:        make([]*GuildState, 0),
+		ID:            "", // is set by CreateSession
 		StateToken:    stateToken,
 		Token:         token,
 		Locker:        locker,
