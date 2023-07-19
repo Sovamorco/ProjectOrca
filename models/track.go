@@ -45,9 +45,9 @@ type YTDLData struct {
 	Title       string            `json:"title"`
 	Channel     string            `json:"channel"`
 	OriginalURL string            `json:"original_url"`
+	URL         string            `json:"url"`
 	IsLive      bool              `json:"is_live"`
 	Duration    float64           `json:"duration"`
-	URL         string            `json:"url"`
 	HTTPHeaders map[string]string `json:"http_headers"`
 }
 
@@ -81,20 +81,25 @@ type MusicTrack struct {
 	Live        bool
 }
 
-func (q *Queue) newMusicTrack(ctx context.Context, url string) (*MusicTrack, error) {
-	ms := q.newMusicTrackEmpty()
-
-	err := ms.getTrackData(url)
+func (q *Queue) newMusicTracks(ctx context.Context, url string) ([]*MusicTrack, error) {
+	tracks, err := q.getTracksData(url)
 	if err != nil {
-		return nil, errorx.Decorate(err, "get stream url")
+		return nil, errorx.Decorate(err, "get tracks data")
 	}
 
-	_, err = q.Store.NewInsert().Model(ms).Exec(ctx)
-	if err != nil {
-		return nil, errorx.Decorate(err, "store music track")
+	res := make([]*MusicTrack, len(tracks))
+
+	for i, trackData := range tracks {
+		res[i] = q.newMusicTrackEmpty()
+		res[i].fill(trackData)
 	}
 
-	return ms, nil
+	_, err = q.Store.NewInsert().Model(&res).Exec(ctx)
+	if err != nil {
+		return nil, errorx.Decorate(err, "store tracks")
+	}
+
+	return res, nil
 }
 
 func (q *Queue) newMusicTrackEmpty() *MusicTrack {
@@ -115,6 +120,19 @@ func (q *Queue) newMusicTrackEmpty() *MusicTrack {
 		URL:         "",
 		HTTPHeaders: nil,
 		Live:        false,
+	}
+}
+
+func (ms *MusicTrack) fill(data YTDLData) {
+	ms.Title = data.Title
+	ms.HTTPHeaders = data.HTTPHeaders
+	ms.Live = data.IsLive
+	ms.Duration = time.Duration(data.Duration * float64(time.Second))
+	ms.Logger = ms.Logger.With("track", ms.Title)
+
+	ms.OriginalURL = data.URL
+	if data.OriginalURL != "" {
+		ms.OriginalURL = data.OriginalURL
 	}
 }
 
@@ -237,39 +255,31 @@ func getYTDLPOutput(logger *zap.SugaredLogger, args ...string) ([]byte, error) {
 	return jsonB, nil
 }
 
-func (ms *MusicTrack) getTrackData(url string) error {
-	jsonB, err := getYTDLPOutput(ms.Logger, "-J", url)
+func (q *Queue) getTracksData(url string) ([]YTDLData, error) {
+	jsonB, err := getYTDLPOutput(q.Logger, "--flat-playlist", "-J", url)
 	if err != nil {
-		return errorx.Decorate(err, "get ytdlp output")
+		return nil, errorx.Decorate(err, "get ytdlp output")
 	}
-
-	var ad YTDLData
 
 	var vd YTDLSearchData
 	err = json.Unmarshal(jsonB, &vd)
 
 	if err != nil {
-		return errorx.Decorate(err, "unmarshal ytdl output")
+		return nil, errorx.Decorate(err, "unmarshal ytdl output")
 	}
+
+	var ad []YTDLData
 
 	if vd.Entries == nil {
-		ad = vd.YTDLData
+		ad = []YTDLData{vd.YTDLData}
 	} else {
 		if len(vd.Entries) < 1 {
-			return ErrNoResults
+			return nil, ErrNoResults
 		}
-		ad = vd.Entries[0]
+		ad = vd.Entries
 	}
 
-	ms.Title = ad.Title
-	ms.OriginalURL = ad.OriginalURL
-	ms.URL = ad.URL
-	ms.HTTPHeaders = ad.HTTPHeaders
-	ms.Live = ad.IsLive
-	ms.Duration = time.Duration(ad.Duration * float64(time.Second))
-	ms.Logger = ms.Logger.With("track", ms.Title)
-
-	return nil
+	return ad, nil
 }
 
 func (ms *MusicTrack) getStreamURL(ctx context.Context) error {
@@ -280,7 +290,7 @@ func (ms *MusicTrack) getStreamURL(ctx context.Context) error {
 
 	ms.URL = strings.TrimSpace(string(urlB))
 
-	_, err = ms.Store.NewUpdate().Model(ms).WherePK().Exec(ctx)
+	_, err = ms.Store.NewUpdate().Model(ms).Column("url").WherePK().Exec(ctx)
 	if err != nil {
 		return errorx.Decorate(err, "store track")
 	}

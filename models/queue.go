@@ -130,16 +130,17 @@ func (q *Queue) Shuffle(ctx context.Context) {
 	})
 
 	baseOrd := q.Tracks[0].OrdKey + 1
+	updTracks := q.Tracks[1:]
 
-	for i, track := range q.Tracks[1:] {
+	for i, track := range updTracks {
 		track.Lock()
 		track.OrdKey = baseOrd + float64(i)
 		track.Unlock()
+	}
 
-		_, err := q.Store.NewUpdate().Model(track).WherePK().Exec(ctx)
-		if err != nil {
-			q.Logger.Errorf("Error updaing track ordkey: %+v", err)
-		}
+	_, err := q.Store.NewUpdate().Model(&updTracks).Column("ord_key").Bulk().Exec(ctx)
+	if err != nil {
+		q.Logger.Errorf("Error updaing tracks ordkeys: %+v", err)
 	}
 
 	q.Unlock()
@@ -162,8 +163,8 @@ func (q *Queue) add(ctx context.Context, ms *MusicTrack, position int) error {
 		return nil
 	}
 
-	// reaching here has the same condition as modifying ms.OrdKeys
-	_, err := q.Store.NewUpdate().Model(ms).WherePK().Exec(ctx)
+	// reaching here has the same condition as modifying ms.OrdKey
+	_, err := q.Store.NewUpdate().Model(ms).Column("ord_key").WherePK().Exec(ctx)
 	if err != nil {
 		return errorx.Decorate(err, "store music track")
 	}
@@ -230,7 +231,7 @@ func (q *Queue) afterStream(ctx context.Context) {
 		// choosePosition updates track's ordKey
 		_ = q.choosePosition(-1, len(q.Tracks), q.Tracks[0])
 
-		_, err := q.Store.NewUpdate().Model(q.Tracks[0]).WherePK().Exec(ctx)
+		_, err := q.Store.NewUpdate().Model(q.Tracks[0]).Column("pos", "ord_key").WherePK().Exec(ctx)
 		if err != nil {
 			q.Logger.Errorf("Error saving position of track in loop: %+v", err)
 		}
@@ -257,7 +258,7 @@ func (q *Queue) storeLoop(ctx context.Context, done chan struct{}) {
 		case <-ticker.C:
 			q.RLock()
 
-			_, err := q.Store.NewUpdate().Model(q.Tracks[0]).WherePK().Exec(ctx)
+			_, err := q.Store.NewUpdate().Model(q.Tracks[0]).Column("pos").WherePK().Exec(ctx)
 			if err != nil {
 				q.Logger.Errorf("Error storing current track: %+v", err)
 			}

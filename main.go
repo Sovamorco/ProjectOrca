@@ -310,7 +310,7 @@ func (o *orcaServer) reregister(
 
 	existing.StateToken = token
 
-	_, err := o.store.NewUpdate().Model(existing).WherePK().Exec(ctx)
+	_, err := o.store.NewUpdate().Model(existing).Column("state_token").WherePK().Exec(ctx)
 	if err != nil {
 		o.logger.Errorf("Error getting guild state: %+v", err)
 
@@ -369,7 +369,7 @@ func (o *orcaServer) Play(ctx context.Context, in *pb.PlayRequest) (*pb.PlayRepl
 		return nil, ErrInternal
 	}
 
-	trackData, err := gs.PlayTrack(ctx, in.ChannelID, in.Url, int(in.Position))
+	tracksData, err := gs.PlayTracks(ctx, in.ChannelID, in.Url, int(in.Position))
 	if err != nil {
 		o.logger.Errorf("Error playing track: %+v", err)
 
@@ -377,7 +377,7 @@ func (o *orcaServer) Play(ctx context.Context, in *pb.PlayRequest) (*pb.PlayRepl
 	}
 
 	return &pb.PlayReply{
-		Track: trackData,
+		Tracks: tracksData,
 	}, nil
 }
 
@@ -448,7 +448,7 @@ func (o *orcaServer) Seek(ctx context.Context, in *pb.SeekRequest) (*pb.SeekRepl
 
 	tc := in.Position.AsDuration()
 
-	err = gs.Seek(tc)
+	err = gs.Seek(ctx, tc)
 	if err != nil {
 		if errors.Is(err, models.ErrSeekLive) {
 			return nil, status.Error(codes.InvalidArgument, "cannot seek live")
@@ -574,7 +574,7 @@ func (o *orcaServer) Loop(ctx context.Context, in *pb.GuildOnlyRequest) (*emptyp
 
 	gs.Queue.Loop = !gs.Queue.Loop
 
-	_, err = o.store.NewUpdate().Model(gs.Queue).WherePK().Exec(ctx)
+	_, err = o.store.NewUpdate().Model(gs.Queue).Column("loop").WherePK().Exec(ctx)
 	if err != nil {
 		o.logger.Errorf("Error storing queue: %+v", err)
 

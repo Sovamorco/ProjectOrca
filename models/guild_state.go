@@ -79,9 +79,7 @@ func (g *GuildState) gracefulShutdown() {
 	}
 }
 
-func (g *GuildState) PlayTrack(ctx context.Context, channelID, url string, position int) (*pb.TrackData, error) {
-	var ms *MusicTrack
-
+func (g *GuildState) PlayTracks(ctx context.Context, channelID, url string, position int) ([]*pb.TrackData, error) {
 	if !utils.URLRx.MatchString(url) {
 		url = "ytsearch:" + url
 	}
@@ -93,17 +91,23 @@ func (g *GuildState) PlayTrack(ctx context.Context, channelID, url string, posit
 		}
 	}
 
-	ms, err := g.Queue.newMusicTrack(ctx, url)
+	mss, err := g.Queue.newMusicTracks(ctx, url)
 	if err != nil {
-		return nil, errorx.Decorate(err, "create music track")
+		return nil, errorx.Decorate(err, "create music tracks")
 	}
 
-	err = g.Queue.add(ctx, ms, position)
-	if err != nil {
-		return nil, errorx.Decorate(err, "add track to Queue")
+	res := make([]*pb.TrackData, len(mss))
+
+	for i, ms := range mss {
+		err = g.Queue.add(ctx, ms, position)
+		if err != nil {
+			return nil, errorx.Decorate(err, "add track to Queue")
+		}
+
+		res[i] = ms.ToProto()
 	}
 
-	return ms.ToProto(), nil
+	return res, nil
 }
 
 func (g *GuildState) Skip() error {
@@ -129,6 +133,7 @@ func (g *GuildState) Stop(ctx context.Context) error {
 		return ErrNotPlaying
 	}
 
+	g.Queue.Loop = false                // disable looping
 	g.Queue.Tracks = g.Queue.Tracks[:1] // leave only current track
 	g.Queue.Stop()                      // stop current track
 
@@ -139,10 +144,15 @@ func (g *GuildState) Stop(ctx context.Context) error {
 		return errorx.Decorate(err, "delete queue tracks")
 	}
 
+	_, err = g.Store.NewUpdate().Model(g.Queue).Column("loop").WherePK().Exec(ctx)
+	if err != nil {
+		return errorx.Decorate(err, "update queue")
+	}
+
 	return nil
 }
 
-func (g *GuildState) Seek(pos time.Duration) error {
+func (g *GuildState) Seek(ctx context.Context, pos time.Duration) error {
 	if g.Queue == nil {
 		return ErrNotPlaying
 	}
@@ -165,6 +175,11 @@ func (g *GuildState) Seek(pos time.Duration) error {
 
 	curr.Seek(pos)
 
+	_, err := g.Store.NewUpdate().Model(curr).Column("pos").WherePK().Exec(ctx)
+	if err != nil {
+		return errorx.Decorate(err, "store new position")
+	}
+
 	return nil
 }
 
@@ -179,7 +194,7 @@ func (g *GuildState) Pause(ctx context.Context) error {
 
 	g.Queue.Pause()
 
-	_, err := g.Store.NewUpdate().Model(g.Queue).WherePK().Exec(ctx)
+	_, err := g.Store.NewUpdate().Model(g.Queue).Column("paused").WherePK().Exec(ctx)
 	if err != nil {
 		return errorx.Decorate(err, "store paused state")
 	}
@@ -198,7 +213,7 @@ func (g *GuildState) Resume(ctx context.Context) error {
 
 	g.Queue.Resume()
 
-	_, err := g.Store.NewUpdate().Model(g.Queue).WherePK().Exec(ctx)
+	_, err := g.Store.NewUpdate().Model(g.Queue).Column("paused").WherePK().Exec(ctx)
 	if err != nil {
 		return errorx.Decorate(err, "store paused state")
 	}
