@@ -176,6 +176,10 @@ func (g *GuildState) Pause(ctx context.Context) error {
 		return ErrNotPlaying
 	}
 
+	if g.Queue.Paused {
+		return ErrAlreadyPaused
+	}
+
 	g.Queue.Pause()
 
 	_, err := g.Store.NewUpdate().Model(g.Queue).WherePK().Exec(ctx)
@@ -189,6 +193,10 @@ func (g *GuildState) Pause(ctx context.Context) error {
 func (g *GuildState) Resume(ctx context.Context) error {
 	if g.Queue == nil || len(g.Queue.Tracks) < 1 {
 		return ErrNotPlaying
+	}
+
+	if !g.Queue.Paused {
+		return ErrNotPaused
 	}
 
 	g.Queue.Resume()
