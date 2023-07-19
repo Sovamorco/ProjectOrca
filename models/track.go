@@ -16,10 +16,8 @@ import (
 
 	"google.golang.org/protobuf/types/known/durationpb"
 
-	"ProjectOrca/store"
-	"ProjectOrca/utils"
-
 	pb "ProjectOrca/proto"
+	"ProjectOrca/store"
 
 	"github.com/google/uuid"
 	"github.com/joomcode/errorx"
@@ -61,13 +59,15 @@ type YTDLSearchData struct {
 type MusicTrack struct {
 	bun.BaseModel `bun:"table:tracks" exhaustruct:"optional"`
 
-	sync.Mutex `bun:"-" exhaustruct:"optional"` // do not store mutex state
-	Queue      *Queue                           `bun:"-"` // do not store parent queue
-	Logger     *zap.SugaredLogger               `bun:"-"` // do not store logger
-	CMD        *exec.Cmd                        `bun:"-"` // do not store cmd
-	Stream     io.ReadCloser                    `bun:"-"` // do not store stream
-	Stop       chan struct{}                    `bun:"-"` // do not store channel
-	Store      *store.Store                     `bun:"-"` // do not store the store
+	// -- non-stored values
+	sync.Mutex  `bun:"-" exhaustruct:"optional"`
+	Queue       *Queue             `bun:"-"`
+	Logger      *zap.SugaredLogger `bun:"-"`
+	CMD         *exec.Cmd          `bun:"-"`
+	Stream      io.ReadCloser      `bun:"-"`
+	Store       *store.Store       `bun:"-"`
+	Initialized bool               `bun:"-"`
+	// -- end non-stored values
 
 	ID          string `bun:",pk"`
 	QueueID     string
@@ -103,8 +103,8 @@ func (q *Queue) newMusicTrackEmpty() *MusicTrack {
 		Logger:      q.Logger.Named("track"),
 		CMD:         nil,
 		Stream:      nil,
-		Stop:        make(chan struct{}),
 		Store:       q.Store,
+		Initialized: false,
 		ID:          uuid.New().String(),
 		QueueID:     q.ID,
 		Pos:         0,
@@ -125,7 +125,6 @@ func (ms *MusicTrack) Restore(q *Queue) {
 
 	ms.Queue = q
 	ms.Logger = logger
-	ms.Stop = make(chan struct{})
 	ms.Store = ms.Queue.Store
 }
 
@@ -142,9 +141,11 @@ func (ms *MusicTrack) ToProto() *pb.TrackData {
 
 func (ms *MusicTrack) Seek(pos time.Duration) error {
 	ms.Lock()
+
 	oldCmd, oldStream := ms.CMD, ms.Stream
 	ms.Pos = pos
 	err := ms.getStream()
+
 	ms.Unlock()
 
 	if err != nil {
@@ -162,6 +163,59 @@ func (ms *MusicTrack) Seek(pos time.Duration) error {
 		err = oldCmd.Process.Signal(syscall.SIGTERM)
 		if err != nil {
 			ms.Logger.Errorf("Error killing old ffmpeg: %+v", err)
+		}
+	}
+
+	return nil
+}
+
+func (ms *MusicTrack) Initialize(ctx context.Context) error {
+	ms.Lock()
+	defer ms.Unlock()
+
+	err := ms.getStreamURL(ctx)
+	if err != nil {
+		if ms.URL == "" {
+			return errorx.Decorate(err, "get stream url")
+		}
+
+		ms.Logger.Errorf("Error getting new stream URL, hoping old one works: %+v", err)
+	}
+
+	err = ms.getStream()
+	if err != nil {
+		return errorx.Decorate(err, "get stream")
+	}
+
+	ms.Initialized = true
+
+	return nil
+}
+
+func (ms *MusicTrack) getPacket(ctx context.Context, packet []byte) error {
+	var err error
+
+	if !ms.Initialized {
+		err = ms.Initialize(ctx)
+		if err != nil {
+			return errorx.Decorate(err, "initialize")
+		}
+	}
+
+	ms.Lock()
+
+	n, err := io.ReadFull(ms.Stream, packet)
+
+	ms.Unlock()
+
+	if err != nil {
+		if !errors.Is(err, io.ErrUnexpectedEOF) {
+			return errorx.Decorate(err, "read audio Stream")
+		}
+
+		// fill rest of the packet with zeros
+		for i := n; i < len(packet); i++ {
+			packet[i] = 0
 		}
 	}
 
@@ -323,104 +377,9 @@ func (ms *MusicTrack) getStream() error {
 	return nil
 }
 
-func (ms *MusicTrack) storeLoop(ctx context.Context, done chan struct{}) {
-	ticker := time.NewTicker(storeInterval)
-
-	for {
-		select {
-		case <-done:
-			return
-		case <-ticker.C:
-			_, err := ms.Store.NewUpdate().Model(ms).WherePK().Exec(ctx)
-			if err != nil {
-				ms.Logger.Errorf("Error storing current track: %+v", err)
-			}
-		}
-	}
-}
-
-func (ms *MusicTrack) streamToVC(ctx context.Context, done chan error) {
-	ms.Logger.Info("Streaming to VC")
-	defer ms.Logger.Info("Finished streaming to VC")
-
-	defer close(done)
-
+func (ms *MusicTrack) cleanup() {
 	ms.Lock()
 
-	err := ms.getStreamURL(ctx)
-	if err != nil {
-		ms.Logger.Errorf("Error getting new stream URL, hoping old one works: %+v", err)
-	}
-
-	err = ms.getStream()
-
-	ms.Unlock()
-
-	if err != nil {
-		done <- errorx.Decorate(err, "get Stream")
-
-		return
-	}
-
-	defer ms.cleanup()
-
-	storeLoopDone := make(chan struct{}, 1)
-	go ms.storeLoop(ctx, storeLoopDone)
-
-	defer func() {
-		storeLoopDone <- struct{}{}
-	}()
-
-	err = ms.streamLoop()
-	if err != nil {
-		done <- errorx.Decorate(err, "stream")
-	}
-}
-
-func (ms *MusicTrack) streamLoop() error {
-	var n int
-
-	var err error
-
-	packet := make([]byte, packetSize)
-
-	for {
-		ms.Lock()
-		n, err = io.ReadFull(ms.Stream, packet)
-		ms.Unlock()
-
-		if err != nil {
-			if !errors.Is(err, io.ErrUnexpectedEOF) {
-				{
-					if !errors.Is(err, io.EOF) {
-						return errorx.Decorate(err, "read audio Stream")
-					}
-
-					return nil
-				}
-			}
-
-			// fill rest of the packet with zeros
-			for i := n; i < len(packet); i++ {
-				packet[i] = 0
-			}
-		}
-
-		select {
-		case <-ms.Stop:
-			utils.Empty(ms.Stop)
-
-			return nil
-		case ms.Queue.VC.OpusSend <- packet:
-		}
-
-		if !ms.Live {
-			ms.Pos += frameSizeMs * time.Millisecond
-		}
-	}
-}
-
-func (ms *MusicTrack) cleanup() {
 	err := ms.Stream.Close()
 	if err != nil && !errors.Is(err, os.ErrClosed) {
 		ms.Logger.Errorf("Error closing Stream: %+v", err)
@@ -430,4 +389,6 @@ func (ms *MusicTrack) cleanup() {
 	if err != nil {
 		ms.Logger.Errorf("Error killing ffmpeg process: %+v", err)
 	}
+
+	ms.Unlock()
 }

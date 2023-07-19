@@ -30,15 +30,6 @@ func GenerateSecureToken() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-func Empty[T any](c chan T) {
-	for len(c) != 0 {
-		select {
-		case <-c:
-		default:
-		}
-	}
-}
-
 func Sum[T Number](nums ...T) T {
 	if len(nums) == 0 {
 		return 0

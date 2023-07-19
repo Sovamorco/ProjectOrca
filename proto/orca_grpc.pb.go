@@ -28,6 +28,8 @@ type OrcaClient interface {
 	Stop(ctx context.Context, in *StopRequest, opts ...grpc.CallOption) (*StopReply, error)
 	Seek(ctx context.Context, in *SeekRequest, opts ...grpc.CallOption) (*SeekReply, error)
 	GetTracks(ctx context.Context, in *GetTracksRequest, opts ...grpc.CallOption) (*GetTracksReply, error)
+	Pause(ctx context.Context, in *PauseRequest, opts ...grpc.CallOption) (*PauseReply, error)
+	Resume(ctx context.Context, in *ResumeRequest, opts ...grpc.CallOption) (*ResumeReply, error)
 }
 
 type orcaClient struct {
@@ -92,6 +94,24 @@ func (c *orcaClient) GetTracks(ctx context.Context, in *GetTracksRequest, opts .
 	return out, nil
 }
 
+func (c *orcaClient) Pause(ctx context.Context, in *PauseRequest, opts ...grpc.CallOption) (*PauseReply, error) {
+	out := new(PauseReply)
+	err := c.cc.Invoke(ctx, "/orca.Orca/Pause", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *orcaClient) Resume(ctx context.Context, in *ResumeRequest, opts ...grpc.CallOption) (*ResumeReply, error) {
+	out := new(ResumeReply)
+	err := c.cc.Invoke(ctx, "/orca.Orca/Resume", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // OrcaServer is the server API for Orca service.
 // All implementations must embed UnimplementedOrcaServer
 // for forward compatibility
@@ -102,6 +122,8 @@ type OrcaServer interface {
 	Stop(context.Context, *StopRequest) (*StopReply, error)
 	Seek(context.Context, *SeekRequest) (*SeekReply, error)
 	GetTracks(context.Context, *GetTracksRequest) (*GetTracksReply, error)
+	Pause(context.Context, *PauseRequest) (*PauseReply, error)
+	Resume(context.Context, *ResumeRequest) (*ResumeReply, error)
 	mustEmbedUnimplementedOrcaServer()
 }
 
@@ -126,6 +148,12 @@ func (UnimplementedOrcaServer) Seek(context.Context, *SeekRequest) (*SeekReply, 
 }
 func (UnimplementedOrcaServer) GetTracks(context.Context, *GetTracksRequest) (*GetTracksReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetTracks not implemented")
+}
+func (UnimplementedOrcaServer) Pause(context.Context, *PauseRequest) (*PauseReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Pause not implemented")
+}
+func (UnimplementedOrcaServer) Resume(context.Context, *ResumeRequest) (*ResumeReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Resume not implemented")
 }
 func (UnimplementedOrcaServer) mustEmbedUnimplementedOrcaServer() {}
 
@@ -248,6 +276,42 @@ func _Orca_GetTracks_Handler(srv interface{}, ctx context.Context, dec func(inte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Orca_Pause_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PauseRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrcaServer).Pause(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/orca.Orca/Pause",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrcaServer).Pause(ctx, req.(*PauseRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Orca_Resume_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResumeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrcaServer).Resume(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/orca.Orca/Resume",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrcaServer).Resume(ctx, req.(*ResumeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Orca_ServiceDesc is the grpc.ServiceDesc for Orca service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -278,6 +342,14 @@ var Orca_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetTracks",
 			Handler:    _Orca_GetTracks_Handler,
+		},
+		{
+			MethodName: "Pause",
+			Handler:    _Orca_Pause_Handler,
+		},
+		{
+			MethodName: "Resume",
+			Handler:    _Orca_Resume_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

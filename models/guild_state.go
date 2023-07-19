@@ -30,8 +30,10 @@ type GuildState struct {
 }
 
 var (
-	ErrNotPlaying = errors.New("nothing playing")
-	ErrSeekLive   = errors.New("cannot seek live track")
+	ErrNotPlaying    = errors.New("nothing playing")
+	ErrSeekLive      = errors.New("cannot seek live track")
+	ErrNotPaused     = errors.New("not paused")
+	ErrAlreadyPaused = errors.New("already paused")
 )
 
 func (s *BotState) NewGuildState(ctx context.Context, guildID string) (*GuildState, error) {
@@ -104,7 +106,7 @@ func (g *GuildState) PlayTrack(ctx context.Context, channelID, url string, posit
 		return nil, errorx.Decorate(err, "create music track")
 	}
 
-	ms, err = g.Queue.add(ctx, ms, position)
+	err = g.Queue.add(ctx, ms, position)
 	if err != nil {
 		return nil, errorx.Decorate(err, "add track to Queue")
 	}
@@ -113,24 +115,20 @@ func (g *GuildState) PlayTrack(ctx context.Context, channelID, url string, posit
 }
 
 func (g *GuildState) Skip() error {
-	g.Queue.Lock()
-
-	if len(g.Queue.Tracks) < 1 {
-		g.Queue.Unlock()
-
+	if g.Queue == nil || len(g.Queue.Tracks) < 1 {
 		return ErrNotPlaying
 	}
 
-	curr := g.Queue.Tracks[0]
-
-	g.Queue.Unlock()
-
-	curr.Stop <- struct{}{}
+	g.Queue.Stop()
 
 	return nil
 }
 
 func (g *GuildState) Stop(ctx context.Context) error {
+	if g.Queue == nil {
+		return ErrNotPlaying
+	}
+
 	g.Queue.Lock()
 
 	if len(g.Queue.Tracks) < 1 {
@@ -139,12 +137,10 @@ func (g *GuildState) Stop(ctx context.Context) error {
 		return ErrNotPlaying
 	}
 
-	current := g.Queue.Tracks[0]
-	g.Queue.Tracks = nil
+	g.Queue.Tracks = g.Queue.Tracks[:1] // leave only current track
+	g.Queue.Stop()                      // stop current track
 
 	g.Queue.Unlock()
-
-	current.Stop <- struct{}{}
 
 	_, err := g.Store.NewDelete().Model((*MusicTrack)(nil)).Where("queue_id = ?", g.Queue.ID).Exec(ctx)
 	if err != nil {
@@ -155,6 +151,10 @@ func (g *GuildState) Stop(ctx context.Context) error {
 }
 
 func (g *GuildState) Seek(pos time.Duration) error {
+	if g.Queue == nil {
+		return ErrNotPlaying
+	}
+
 	g.Queue.Lock()
 
 	if len(g.Queue.Tracks) < 1 {
@@ -175,6 +175,34 @@ func (g *GuildState) Seek(pos time.Duration) error {
 	if err != nil {
 		return errorx.Decorate(err, "seek")
 	}
+
+	return nil
+}
+
+func (g *GuildState) Pause() error {
+	if g.Queue == nil || len(g.Queue.Tracks) < 1 {
+		return ErrNotPlaying
+	}
+
+	if len(g.Queue.Playing) < 1 {
+		return ErrAlreadyPaused
+	}
+
+	<-g.Queue.Playing
+
+	return nil
+}
+
+func (g *GuildState) Resume() error {
+	if g.Queue == nil || len(g.Queue.Tracks) < 1 {
+		return ErrNotPlaying
+	}
+
+	if len(g.Queue.Playing) > 0 {
+		return ErrNotPaused
+	}
+
+	g.Queue.Playing <- struct{}{}
 
 	return nil
 }

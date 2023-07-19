@@ -11,6 +11,8 @@ service Orca {
   rpc Stop (StopRequest) returns (StopReply) {}
   rpc Seek (SeekRequest) returns (SeekReply) {}
   rpc GetTracks (GetTracksRequest) returns (GetTracksReply) {}
+  rpc Pause (PauseRequest) returns (PauseReply) {}
+  rpc Resume (ResumeRequest) returns (ResumeReply) {}
 }
 
 message RegisterRequest {
@@ -70,3 +72,15 @@ message GetTracksReply {
   repeated TrackData tracks = 1;
   int64 totalTracks = 2;
 }
+
+message PauseRequest {
+  string guildID = 1;
+}
+
+message PauseReply {}
+
+message ResumeRequest {
+  string guildID = 1;
+}
+
+message ResumeReply {}

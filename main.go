@@ -513,6 +513,52 @@ func (o *orcaServer) GetTracks(ctx context.Context, in *pb.GetTracksRequest) (*p
 	}, nil
 }
 
+func (o *orcaServer) Pause(ctx context.Context, in *pb.PauseRequest) (*pb.PauseReply, error) {
+	state, err := o.getState(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	gs, err := state.GetOrCreateGuildState(ctx, in.GuildID)
+	if err != nil {
+		o.logger.Errorf("Error getting guild state: %+v", err)
+
+		return nil, ErrInternal
+	}
+
+	err = gs.Pause()
+	if err != nil {
+		o.logger.Errorf("Error pausing: %+v", err)
+
+		return nil, ErrInternal
+	}
+
+	return &pb.PauseReply{}, nil
+}
+
+func (o *orcaServer) Resume(ctx context.Context, in *pb.ResumeRequest) (*pb.ResumeReply, error) {
+	state, err := o.getState(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	gs, err := state.GetOrCreateGuildState(ctx, in.GuildID)
+	if err != nil {
+		o.logger.Errorf("Error getting guild state: %+v", err)
+
+		return nil, ErrInternal
+	}
+
+	err = gs.Resume()
+	if err != nil {
+		o.logger.Errorf("Error resuming: %+v", err)
+
+		return nil, ErrInternal
+	}
+
+	return &pb.ResumeReply{}, nil
+}
+
 func main() {
 	coreLogger, err := zap.NewDevelopment(zap.IncreaseLevel(zapcore.DebugLevel))
 	if err != nil {
@@ -647,7 +693,7 @@ func run(ctx context.Context, logger *zap.SugaredLogger) error { //nolint:funlen
 	}
 }
 
-func (o *orcaServer) forwardRequest(ctx context.Context, call, recip string, req any) (any, error) {
+func (o *orcaServer) forwardRequest(ctx context.Context, call, recip string, req any) (any, error) { //nolint:cyclop
 	o.logger.Debugf("Forwarding request %s to %s", call, recip)
 
 	conn, err := grpc.Dial(
@@ -676,6 +722,12 @@ func (o *orcaServer) forwardRequest(ctx context.Context, call, recip string, req
 		res = new(pb.SkipReply)
 	case *pb.StopRequest:
 		res = new(pb.StopReply)
+	case *pb.GetTracksRequest:
+		res = new(pb.GetTracksReply)
+	case *pb.PauseRequest:
+		res = new(pb.PauseReply)
+	case *pb.ResumeRequest:
+		res = new(pb.ResumeReply)
 	}
 
 	err = conn.Invoke(ctx, call, req, res)

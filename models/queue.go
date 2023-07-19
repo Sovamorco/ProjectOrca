@@ -2,8 +2,11 @@ package models
 
 import (
 	"context"
+	"errors"
+	"io"
 	"slices"
 	"sync"
+	"time"
 
 	"ProjectOrca/store"
 	"ProjectOrca/utils"
@@ -18,11 +21,18 @@ import (
 type Queue struct {
 	bun.BaseModel `bun:"table:queues" exhaustruct:"optional"`
 
-	sync.Mutex `bun:"-" exhaustruct:"optional"` // do not store mutex state
-	GuildState *GuildState                      `bun:"-"` // do not store parent guild state
-	Logger     *zap.SugaredLogger               `bun:"-"` // do not store logger
-	VC         *discordgo.VoiceConnection       `bun:"-"` // do not store voice connection
-	Store      *store.Store                     `bun:"-"` // do not store the store
+	// -- non-stored values
+	sync.Mutex `bun:"-" exhaustruct:"optional"`
+	GuildState *GuildState                `bun:"-"`
+	Logger     *zap.SugaredLogger         `bun:"-"`
+	VC         *discordgo.VoiceConnection `bun:"-"`
+	Store      *store.Store               `bun:"-"`
+	// stop channel will stop current track playback upon receiving signal
+	stop chan struct{} `bun:"-"`
+	// Playing channel has to have a message for track to be playing
+	// consume message from Playing to pause the track - add it back to resume it
+	Playing chan struct{} `bun:"-"`
+	// -- end non-stored values
 
 	ID        string `bun:",pk"`
 	GuildID   string
@@ -36,6 +46,8 @@ func (g *GuildState) newQueue(ctx context.Context, channelID string) error {
 		Logger:     g.Logger.Named("queue"),
 		VC:         nil,
 		Store:      g.Store,
+		stop:       make(chan struct{}, 1),
+		Playing:    make(chan struct{}, 1),
 
 		ID:        uuid.New().String(),
 		GuildID:   g.ID,
@@ -59,6 +71,8 @@ func (q *Queue) Restore(ctx context.Context, g *GuildState) {
 	q.GuildState = g
 	q.Logger = logger
 	q.Store = q.GuildState.Store
+	q.stop = make(chan struct{}, 1)
+	q.Playing = make(chan struct{}, 1)
 
 	for _, track := range q.Tracks {
 		track.Restore(q)
@@ -69,9 +83,14 @@ func (q *Queue) Restore(ctx context.Context, g *GuildState) {
 	}
 }
 
-func (q *Queue) add(ctx context.Context, ms *MusicTrack, position int) (*MusicTrack, error) {
-	retms := ms
+func (q *Queue) Stop() {
+	if len(q.stop) > 0 { // stop already queued
+		return
+	}
+	q.stop <- struct{}{}
+}
 
+func (q *Queue) add(ctx context.Context, ms *MusicTrack, position int) error {
 	q.Lock()
 
 	qlen := len(q.Tracks)
@@ -83,41 +102,21 @@ func (q *Queue) add(ctx context.Context, ms *MusicTrack, position int) (*MusicTr
 	if qlen == 0 { // a.k.a if there were no tracks in the queue before we added this one
 		go q.start(context.WithoutCancel(ctx))
 
-		return retms, nil
-	} else if position == 0 {
-		q.Tracks[0].Lock()
-		err := q.Tracks[0].getStream()
-		q.Tracks[0].Unlock()
-
-		if err != nil {
-			return nil, errorx.Decorate(err, "get stream")
-		}
-
-		// very, very bad scary things
-		q.Tracks[0].Lock()
-		q.Tracks[1].Lock()
-
-		//goland:noinspection GoVetCopyLock
-		*q.Tracks[0], *q.Tracks[1] = *q.Tracks[1], *q.Tracks[0] //nolint:govet
-		q.Tracks[0], q.Tracks[1] = q.Tracks[1], q.Tracks[0]
-
-		retms = q.Tracks[0]
-
-		q.Tracks[0].Unlock()
-		q.Tracks[1].Unlock()
+		return nil
 	}
 
 	// reaching here has the same condition as modifying ms.OrdKeys
-	_, err := q.Store.NewUpdate().Model(retms).WherePK().Exec(ctx)
+	_, err := q.Store.NewUpdate().Model(ms).WherePK().Exec(ctx)
 	if err != nil {
-		return nil, errorx.Decorate(err, "store music track")
+		return errorx.Decorate(err, "store music track")
 	}
 
-	return retms, nil
+	return nil
 }
 
 func (q *Queue) start(ctx context.Context) {
 	q.Logger.Info("Starting playback")
+	defer q.Logger.Info("Finished playback")
 
 	vc, err := q.GuildState.BotState.Session.ChannelVoiceJoin(q.GuildState.GuildID, q.ChannelID, false, true)
 	if err != nil {
@@ -135,45 +134,131 @@ func (q *Queue) start(ctx context.Context) {
 		}
 	}(vc)
 
+	storeLoopDone := make(chan struct{}, 1)
+	go q.storeLoop(ctx, storeLoopDone)
+
+	defer func() {
+		storeLoopDone <- struct{}{}
+	}()
+
 	for {
 		done := make(chan error, 1)
 
-		q.Lock()
-
-		if len(q.Tracks) > 0 {
-			q.Unlock()
-
+		if len(q.Tracks) < 1 {
 			break
 		}
 
-		curr := q.Tracks[0]
-
-		q.Unlock()
-
-		curr.streamToVC(ctx, done)
+		q.streamToVC(ctx, done)
 
 		err := <-done
 		if err != nil {
 			q.Logger.Errorf("Error when streaming track: %+v", err)
 		}
 
-		_, err = q.Store.NewDelete().Model(curr).WherePK().Exec(ctx)
-		if err != nil {
-			q.Logger.Errorf("Error deleting track from store: %+v", err)
-		}
-
-		// check before indexing because of stop call
 		q.Lock()
 
+		// check before indexing because of stop call
 		if len(q.Tracks) < 1 {
 			q.Unlock()
 
 			break
 		}
 
+		q.Tracks[0].cleanup()
+
+		_, err = q.Store.NewDelete().Model(q.Tracks[0]).WherePK().Exec(ctx)
+		if err != nil {
+			q.Logger.Errorf("Error deleting track from store: %+v", err)
+		}
+
 		q.Tracks = q.Tracks[1:]
 
 		q.Unlock()
+	}
+}
+
+func (q *Queue) storeLoop(ctx context.Context, done chan struct{}) {
+	ticker := time.NewTicker(storeInterval)
+
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			q.Lock()
+
+			_, err := q.Store.NewUpdate().Model(q.Tracks[0]).WherePK().Exec(ctx)
+			if err != nil {
+				q.Logger.Errorf("Error storing current track: %+v", err)
+			}
+
+			q.Unlock()
+		}
+	}
+}
+
+// streamToVC initializes first track in the queue and then starts stream loop.
+func (q *Queue) streamToVC(ctx context.Context, done chan error) {
+	q.Logger.Info("Streaming to VC")
+	defer q.Logger.Info("Finished streaming to VC")
+
+	defer close(done)
+
+	if len(q.Tracks) < 1 {
+		return
+	}
+
+	// start the track if not playing
+	if len(q.Playing) < 1 {
+		q.Playing <- struct{}{}
+	}
+
+	err := q.streamLoop(ctx)
+	if err != nil {
+		done <- errorx.Decorate(err, "stream")
+	}
+}
+
+func (q *Queue) streamLoop(ctx context.Context) error {
+	var err error
+
+	var ms *MusicTrack
+
+	packet := make([]byte, packetSize)
+
+	for {
+		q.Lock()
+
+		if len(q.Tracks) < 1 {
+			return nil
+		}
+
+		ms = q.Tracks[0]
+
+		q.Unlock()
+
+		err = ms.getPacket(ctx, packet)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+
+			return errorx.Decorate(err, "get packet")
+		}
+
+		// consume into itself to check that it has a value
+		// if the value is missing - wait for it to be present
+		q.Playing <- <-q.Playing
+
+		select {
+		case <-q.stop:
+			return nil
+		case q.VC.OpusSend <- packet:
+		}
+
+		if !ms.Live {
+			ms.Pos += frameSizeMs * time.Millisecond
+		}
 	}
 }
 
