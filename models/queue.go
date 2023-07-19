@@ -119,9 +119,10 @@ func (q *Queue) Resume() {
 }
 
 func (q *Queue) Shuffle(ctx context.Context) {
-	if len(q.Tracks) < 2 {
+	if len(q.Tracks) < 3 { //nolint:gomnd // 1 playing track and at least 2 to actually shuffle
 		return
 	}
+
 	q.Lock()
 	// shuffle all tracks but the currently playing
 	rand.Shuffle(len(q.Tracks)-1, func(i, j int) {
