@@ -132,7 +132,7 @@ func (g *GuildState) Stop(ctx context.Context) error {
 	g.Queue.Lock()
 
 	if len(g.Queue.Tracks) < 1 {
-		g.Queue.Unlock()
+		g.Queue.RUnlock()
 
 		return ErrNotPlaying
 	}
@@ -155,17 +155,17 @@ func (g *GuildState) Seek(pos time.Duration) error {
 		return ErrNotPlaying
 	}
 
-	g.Queue.Lock()
+	g.Queue.RLock()
 
 	if len(g.Queue.Tracks) < 1 {
-		g.Queue.Unlock()
+		g.Queue.RUnlock()
 
 		return ErrNotPlaying
 	}
 
 	curr := g.Queue.Tracks[0]
 
-	g.Queue.Unlock()
+	g.Queue.RUnlock()
 
 	if curr.Live {
 		return ErrSeekLive

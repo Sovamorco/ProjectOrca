@@ -22,11 +22,11 @@ type Queue struct {
 	bun.BaseModel `bun:"table:queues" exhaustruct:"optional"`
 
 	// -- non-stored values
-	sync.Mutex `bun:"-" exhaustruct:"optional"`
-	GuildState *GuildState                `bun:"-"`
-	Logger     *zap.SugaredLogger         `bun:"-"`
-	VC         *discordgo.VoiceConnection `bun:"-"`
-	Store      *store.Store               `bun:"-"`
+	sync.RWMutex `bun:"-" exhaustruct:"optional"`
+	GuildState   *GuildState                `bun:"-"`
+	Logger       *zap.SugaredLogger         `bun:"-"`
+	VC           *discordgo.VoiceConnection `bun:"-"`
+	Store        *store.Store               `bun:"-"`
 	// stop channel will stop current track playback upon receiving signal
 	stop chan struct{} `bun:"-"`
 	// Playing channel has to have a message for track to be playing
@@ -185,14 +185,14 @@ func (q *Queue) storeLoop(ctx context.Context, done chan struct{}) {
 		case <-done:
 			return
 		case <-ticker.C:
-			q.Lock()
+			q.RLock()
 
 			_, err := q.Store.NewUpdate().Model(q.Tracks[0]).WherePK().Exec(ctx)
 			if err != nil {
 				q.Logger.Errorf("Error storing current track: %+v", err)
 			}
 
-			q.Unlock()
+			q.RUnlock()
 		}
 	}
 }
@@ -227,7 +227,7 @@ func (q *Queue) streamLoop(ctx context.Context) error {
 	packet := make([]byte, packetSize)
 
 	for {
-		q.Lock()
+		q.RLock()
 
 		if len(q.Tracks) < 1 {
 			return nil
@@ -235,7 +235,7 @@ func (q *Queue) streamLoop(ctx context.Context) error {
 
 		ms = q.Tracks[0]
 
-		q.Unlock()
+		q.RUnlock()
 
 		err = ms.getPacket(ctx, packet)
 		if err != nil {

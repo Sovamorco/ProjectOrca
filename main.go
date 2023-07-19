@@ -489,7 +489,7 @@ func (o *orcaServer) GetTracks(ctx context.Context, in *pb.GetTracksRequest) (*p
 		}, nil
 	}
 
-	gs.Queue.Lock()
+	gs.Queue.RLock()
 
 	qlen := len(gs.Queue.Tracks)
 	// start has to be at least 0 and at most qlen
@@ -499,7 +499,7 @@ func (o *orcaServer) GetTracks(ctx context.Context, in *pb.GetTracksRequest) (*p
 
 	tracks := gs.Queue.Tracks[start:end]
 
-	gs.Queue.Unlock()
+	gs.Queue.RUnlock()
 
 	res := make([]*pb.TrackData, 0, len(tracks))
 

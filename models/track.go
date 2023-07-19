@@ -60,13 +60,13 @@ type MusicTrack struct {
 	bun.BaseModel `bun:"table:tracks" exhaustruct:"optional"`
 
 	// -- non-stored values
-	sync.Mutex  `bun:"-" exhaustruct:"optional"`
-	Queue       *Queue             `bun:"-"`
-	Logger      *zap.SugaredLogger `bun:"-"`
-	CMD         *exec.Cmd          `bun:"-"`
-	Stream      io.ReadCloser      `bun:"-"`
-	Store       *store.Store       `bun:"-"`
-	Initialized bool               `bun:"-"`
+	sync.RWMutex `bun:"-" exhaustruct:"optional"`
+	Queue        *Queue             `bun:"-"`
+	Logger       *zap.SugaredLogger `bun:"-"`
+	CMD          *exec.Cmd          `bun:"-"`
+	Stream       io.ReadCloser      `bun:"-"`
+	Store        *store.Store       `bun:"-"`
+	Initialized  bool               `bun:"-"`
 	// -- end non-stored values
 
 	ID          string `bun:",pk"`
@@ -202,11 +202,11 @@ func (ms *MusicTrack) getPacket(ctx context.Context, packet []byte) error {
 		}
 	}
 
-	ms.Lock()
+	ms.RLock()
 
 	n, err := io.ReadFull(ms.Stream, packet)
 
-	ms.Unlock()
+	ms.RUnlock()
 
 	if err != nil {
 		if !errors.Is(err, io.ErrUnexpectedEOF) {
