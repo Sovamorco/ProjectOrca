@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"math/rand"
 	"slices"
 	"sync"
 	"time"
@@ -115,6 +116,32 @@ func (q *Queue) Resume() {
 
 	q.resume <- struct{}{}
 	q.Paused = false
+}
+
+func (q *Queue) Shuffle(ctx context.Context) {
+	if len(q.Tracks) < 2 {
+		return
+	}
+	q.Lock()
+	// shuffle all tracks but the currently playing
+	rand.Shuffle(len(q.Tracks)-1, func(i, j int) {
+		q.Tracks[i+1], q.Tracks[j+1] = q.Tracks[j+1], q.Tracks[i+1]
+	})
+
+	baseOrd := q.Tracks[0].OrdKey + 1
+
+	for i, track := range q.Tracks[1:] {
+		track.Lock()
+		track.OrdKey = baseOrd + float64(i)
+		track.Unlock()
+
+		_, err := q.Store.NewUpdate().Model(track).WherePK().Exec(ctx)
+		if err != nil {
+			q.Logger.Errorf("Error updaing track ordkey: %+v", err)
+		}
+	}
+
+	q.Unlock()
 }
 
 func (q *Queue) add(ctx context.Context, ms *MusicTrack, position int) error {

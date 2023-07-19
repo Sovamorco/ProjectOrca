@@ -15,6 +15,7 @@ service Orca {
   rpc Pause (GuildOnlyRequest) returns (google.protobuf.Empty) {}
   rpc Resume (GuildOnlyRequest) returns (google.protobuf.Empty) {}
   rpc Loop (GuildOnlyRequest) returns (google.protobuf.Empty) {}
+  rpc ShuffleQueue(GuildOnlyRequest) returns (google.protobuf.Empty) {}
 }
 
 message RegisterRequest {

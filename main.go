@@ -584,6 +584,28 @@ func (o *orcaServer) Loop(ctx context.Context, in *pb.GuildOnlyRequest) (*emptyp
 	return &emptypb.Empty{}, nil
 }
 
+func (o *orcaServer) ShuffleQueue(ctx context.Context, in *pb.GuildOnlyRequest) (*emptypb.Empty, error) {
+	state, err := o.getState(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	gs, err := state.GetOrCreateGuildState(ctx, in.GuildID)
+	if err != nil {
+		o.logger.Errorf("Error getting guild state: %+v", err)
+
+		return nil, ErrInternal
+	}
+
+	if gs.Queue == nil {
+		return nil, status.Error(codes.InvalidArgument, "nothing playing")
+	}
+
+	gs.Queue.Shuffle(ctx)
+
+	return &emptypb.Empty{}, nil
+}
+
 func main() {
 	coreLogger, err := zap.NewDevelopment(zap.IncreaseLevel(zapcore.DebugLevel))
 	if err != nil {
