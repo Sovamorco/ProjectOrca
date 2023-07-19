@@ -11,6 +11,7 @@ import (
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
 
 // This is a compile-time assertion to ensure that this generated file
@@ -24,13 +25,13 @@ const _ = grpc.SupportPackageIsVersion7
 type OrcaClient interface {
 	Register(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (*RegisterReply, error)
 	Play(ctx context.Context, in *PlayRequest, opts ...grpc.CallOption) (*PlayReply, error)
-	Skip(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*GuildOnlyReply, error)
-	Stop(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*GuildOnlyReply, error)
+	Skip(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	Stop(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	Seek(ctx context.Context, in *SeekRequest, opts ...grpc.CallOption) (*SeekReply, error)
 	GetTracks(ctx context.Context, in *GetTracksRequest, opts ...grpc.CallOption) (*GetTracksReply, error)
-	Pause(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*GuildOnlyReply, error)
-	Resume(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*GuildOnlyReply, error)
-	Loop(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*GuildOnlyReply, error)
+	Pause(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	Resume(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	Loop(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 }
 
 type orcaClient struct {
@@ -59,8 +60,8 @@ func (c *orcaClient) Play(ctx context.Context, in *PlayRequest, opts ...grpc.Cal
 	return out, nil
 }
 
-func (c *orcaClient) Skip(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*GuildOnlyReply, error) {
-	out := new(GuildOnlyReply)
+func (c *orcaClient) Skip(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	out := new(emptypb.Empty)
 	err := c.cc.Invoke(ctx, "/orca.Orca/Skip", in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -68,8 +69,8 @@ func (c *orcaClient) Skip(ctx context.Context, in *GuildOnlyRequest, opts ...grp
 	return out, nil
 }
 
-func (c *orcaClient) Stop(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*GuildOnlyReply, error) {
-	out := new(GuildOnlyReply)
+func (c *orcaClient) Stop(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	out := new(emptypb.Empty)
 	err := c.cc.Invoke(ctx, "/orca.Orca/Stop", in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -95,8 +96,8 @@ func (c *orcaClient) GetTracks(ctx context.Context, in *GetTracksRequest, opts .
 	return out, nil
 }
 
-func (c *orcaClient) Pause(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*GuildOnlyReply, error) {
-	out := new(GuildOnlyReply)
+func (c *orcaClient) Pause(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	out := new(emptypb.Empty)
 	err := c.cc.Invoke(ctx, "/orca.Orca/Pause", in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -104,8 +105,8 @@ func (c *orcaClient) Pause(ctx context.Context, in *GuildOnlyRequest, opts ...gr
 	return out, nil
 }
 
-func (c *orcaClient) Resume(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*GuildOnlyReply, error) {
-	out := new(GuildOnlyReply)
+func (c *orcaClient) Resume(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	out := new(emptypb.Empty)
 	err := c.cc.Invoke(ctx, "/orca.Orca/Resume", in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -113,8 +114,8 @@ func (c *orcaClient) Resume(ctx context.Context, in *GuildOnlyRequest, opts ...g
 	return out, nil
 }
 
-func (c *orcaClient) Loop(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*GuildOnlyReply, error) {
-	out := new(GuildOnlyReply)
+func (c *orcaClient) Loop(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	out := new(emptypb.Empty)
 	err := c.cc.Invoke(ctx, "/orca.Orca/Loop", in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -128,13 +129,13 @@ func (c *orcaClient) Loop(ctx context.Context, in *GuildOnlyRequest, opts ...grp
 type OrcaServer interface {
 	Register(context.Context, *RegisterRequest) (*RegisterReply, error)
 	Play(context.Context, *PlayRequest) (*PlayReply, error)
-	Skip(context.Context, *GuildOnlyRequest) (*GuildOnlyReply, error)
-	Stop(context.Context, *GuildOnlyRequest) (*GuildOnlyReply, error)
+	Skip(context.Context, *GuildOnlyRequest) (*emptypb.Empty, error)
+	Stop(context.Context, *GuildOnlyRequest) (*emptypb.Empty, error)
 	Seek(context.Context, *SeekRequest) (*SeekReply, error)
 	GetTracks(context.Context, *GetTracksRequest) (*GetTracksReply, error)
-	Pause(context.Context, *GuildOnlyRequest) (*GuildOnlyReply, error)
-	Resume(context.Context, *GuildOnlyRequest) (*GuildOnlyReply, error)
-	Loop(context.Context, *GuildOnlyRequest) (*GuildOnlyReply, error)
+	Pause(context.Context, *GuildOnlyRequest) (*emptypb.Empty, error)
+	Resume(context.Context, *GuildOnlyRequest) (*emptypb.Empty, error)
+	Loop(context.Context, *GuildOnlyRequest) (*emptypb.Empty, error)
 	mustEmbedUnimplementedOrcaServer()
 }
 
@@ -148,10 +149,10 @@ func (UnimplementedOrcaServer) Register(context.Context, *RegisterRequest) (*Reg
 func (UnimplementedOrcaServer) Play(context.Context, *PlayRequest) (*PlayReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Play not implemented")
 }
-func (UnimplementedOrcaServer) Skip(context.Context, *GuildOnlyRequest) (*GuildOnlyReply, error) {
+func (UnimplementedOrcaServer) Skip(context.Context, *GuildOnlyRequest) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Skip not implemented")
 }
-func (UnimplementedOrcaServer) Stop(context.Context, *GuildOnlyRequest) (*GuildOnlyReply, error) {
+func (UnimplementedOrcaServer) Stop(context.Context, *GuildOnlyRequest) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Stop not implemented")
 }
 func (UnimplementedOrcaServer) Seek(context.Context, *SeekRequest) (*SeekReply, error) {
@@ -160,13 +161,13 @@ func (UnimplementedOrcaServer) Seek(context.Context, *SeekRequest) (*SeekReply, 
 func (UnimplementedOrcaServer) GetTracks(context.Context, *GetTracksRequest) (*GetTracksReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetTracks not implemented")
 }
-func (UnimplementedOrcaServer) Pause(context.Context, *GuildOnlyRequest) (*GuildOnlyReply, error) {
+func (UnimplementedOrcaServer) Pause(context.Context, *GuildOnlyRequest) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Pause not implemented")
 }
-func (UnimplementedOrcaServer) Resume(context.Context, *GuildOnlyRequest) (*GuildOnlyReply, error) {
+func (UnimplementedOrcaServer) Resume(context.Context, *GuildOnlyRequest) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Resume not implemented")
 }
-func (UnimplementedOrcaServer) Loop(context.Context, *GuildOnlyRequest) (*GuildOnlyReply, error) {
+func (UnimplementedOrcaServer) Loop(context.Context, *GuildOnlyRequest) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Loop not implemented")
 }
 func (UnimplementedOrcaServer) mustEmbedUnimplementedOrcaServer() {}

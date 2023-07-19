@@ -33,7 +33,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 type key int
@@ -243,7 +243,9 @@ func (o *orcaServer) authLogInterceptor(
 	}
 
 	if state.Locker != o.id {
-		res, err := o.forwardRequest(ctx, serverInfo.FullMethod, state.LockerAddress, req)
+		res := make([]byte, 0)
+
+		err = o.forwardRequest(ctx, serverInfo.FullMethod, state.LockerAddress, req, &res)
 		if err != nil {
 			o.logger.Debugf("Returning error: %+v", err)
 		}
@@ -292,19 +294,10 @@ func (o *orcaServer) reregister(
 			return nil, err
 		}
 
-		replI, err := o.forwardRequest(ctx, fullMethod, existing.LockerAddress, in)
-		if replI == nil {
-			return nil, err
-		}
+		res := new(pb.RegisterReply)
+		err = o.forwardRequest(ctx, fullMethod, existing.LockerAddress, in, res)
 
-		repl, ok := replI.(*pb.RegisterReply)
-		if !ok {
-			o.logger.Errorf("reply from forwarded request is %s, not *pb.RegisterReply", reflect.TypeOf(replI))
-
-			return nil, ErrInternal
-		}
-
-		return repl, err
+		return res, err
 	}
 
 	existing = o.states[existing.ID]
@@ -388,7 +381,7 @@ func (o *orcaServer) Play(ctx context.Context, in *pb.PlayRequest) (*pb.PlayRepl
 	}, nil
 }
 
-func (o *orcaServer) Skip(ctx context.Context, in *pb.GuildOnlyRequest) (*pb.GuildOnlyReply, error) {
+func (o *orcaServer) Skip(ctx context.Context, in *pb.GuildOnlyRequest) (*emptypb.Empty, error) {
 	state, err := o.getState(ctx)
 	if err != nil {
 		return nil, err
@@ -410,10 +403,10 @@ func (o *orcaServer) Skip(ctx context.Context, in *pb.GuildOnlyRequest) (*pb.Gui
 		return nil, ErrInternal
 	}
 
-	return &pb.GuildOnlyReply{}, nil
+	return &emptypb.Empty{}, nil
 }
 
-func (o *orcaServer) Stop(ctx context.Context, in *pb.GuildOnlyRequest) (*pb.GuildOnlyReply, error) {
+func (o *orcaServer) Stop(ctx context.Context, in *pb.GuildOnlyRequest) (*emptypb.Empty, error) {
 	state, err := o.getState(ctx)
 	if err != nil {
 		return nil, err
@@ -435,7 +428,7 @@ func (o *orcaServer) Stop(ctx context.Context, in *pb.GuildOnlyRequest) (*pb.Gui
 		return nil, ErrInternal
 	}
 
-	return &pb.GuildOnlyReply{}, nil
+	return &emptypb.Empty{}, nil
 }
 
 func (o *orcaServer) Seek(ctx context.Context, in *pb.SeekRequest) (*pb.SeekReply, error) {
@@ -516,7 +509,7 @@ func (o *orcaServer) GetTracks(ctx context.Context, in *pb.GetTracksRequest) (*p
 	}, nil
 }
 
-func (o *orcaServer) Pause(ctx context.Context, in *pb.GuildOnlyRequest) (*pb.GuildOnlyReply, error) {
+func (o *orcaServer) Pause(ctx context.Context, in *pb.GuildOnlyRequest) (*emptypb.Empty, error) {
 	state, err := o.getState(ctx)
 	if err != nil {
 		return nil, err
@@ -536,10 +529,10 @@ func (o *orcaServer) Pause(ctx context.Context, in *pb.GuildOnlyRequest) (*pb.Gu
 		return nil, ErrInternal
 	}
 
-	return &pb.GuildOnlyReply{}, nil
+	return &emptypb.Empty{}, nil
 }
 
-func (o *orcaServer) Resume(ctx context.Context, in *pb.GuildOnlyRequest) (*pb.GuildOnlyReply, error) {
+func (o *orcaServer) Resume(ctx context.Context, in *pb.GuildOnlyRequest) (*emptypb.Empty, error) {
 	state, err := o.getState(ctx)
 	if err != nil {
 		return nil, err
@@ -559,10 +552,10 @@ func (o *orcaServer) Resume(ctx context.Context, in *pb.GuildOnlyRequest) (*pb.G
 		return nil, ErrInternal
 	}
 
-	return &pb.GuildOnlyReply{}, nil
+	return &emptypb.Empty{}, nil
 }
 
-func (o *orcaServer) Loop(ctx context.Context, in *pb.GuildOnlyRequest) (*pb.GuildOnlyReply, error) {
+func (o *orcaServer) Loop(ctx context.Context, in *pb.GuildOnlyRequest) (*emptypb.Empty, error) {
 	state, err := o.getState(ctx)
 	if err != nil {
 		return nil, err
@@ -588,7 +581,7 @@ func (o *orcaServer) Loop(ctx context.Context, in *pb.GuildOnlyRequest) (*pb.Gui
 		return nil, ErrInternal
 	}
 
-	return &pb.GuildOnlyReply{}, nil
+	return &emptypb.Empty{}, nil
 }
 
 func main() {
@@ -697,6 +690,7 @@ func run(ctx context.Context, logger *zap.SugaredLogger) error { //nolint:funlen
 
 	grpcServer := grpc.NewServer(
 		grpc.UnaryInterceptor(orca.authLogInterceptor),
+		grpc.ForceServerCodec(utils.BytesOrProtoMarshaller{}),
 	)
 	pb.RegisterOrcaServer(grpcServer, orca)
 
@@ -725,15 +719,16 @@ func run(ctx context.Context, logger *zap.SugaredLogger) error { //nolint:funlen
 	}
 }
 
-func (o *orcaServer) forwardRequest(ctx context.Context, call, recip string, req any) (any, error) {
+func (o *orcaServer) forwardRequest(ctx context.Context, call, recip string, req, res any) error {
 	o.logger.Debugf("Forwarding request %s to %s", call, recip)
 
 	conn, err := grpc.Dial(
 		recip,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.ForceCodec(utils.BytesOrProtoMarshaller{})),
 	)
 	if err != nil {
-		return nil, errorx.Decorate(err, "connect to recipient")
+		return errorx.Decorate(err, "connect to recipient")
 	}
 
 	md, ok := metadata.FromIncomingContext(ctx)
@@ -741,24 +736,9 @@ func (o *orcaServer) forwardRequest(ctx context.Context, call, recip string, req
 		ctx = metadata.NewOutgoingContext(ctx, md)
 	}
 
-	var res proto.Message
-
-	switch req.(type) {
-	case *pb.PlayRequest:
-		res = new(pb.PlayReply)
-	case *pb.RegisterRequest:
-		res = new(pb.RegisterReply)
-	case *pb.SeekRequest:
-		res = new(pb.SeekReply)
-	case *pb.GuildOnlyReply:
-		res = new(pb.GuildOnlyReply)
-	case *pb.GetTracksRequest:
-		res = new(pb.GetTracksReply)
-	}
-
 	err = conn.Invoke(ctx, call, req, res)
 
-	return res, err //nolint:wrapcheck
+	return err //nolint:wrapcheck
 }
 
 func (o *orcaServer) handleDeathrattle(ctx context.Context, ch <-chan *redis.Message) {

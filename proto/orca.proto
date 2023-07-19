@@ -3,17 +3,18 @@ package orca;
 option go_package = "ProjectOrca/proto/orca";
 
 import "google/protobuf/duration.proto";
+import "google/protobuf/empty.proto";
 
 service Orca {
   rpc Register (RegisterRequest) returns (RegisterReply) {}
   rpc Play (PlayRequest) returns (PlayReply) {}
-  rpc Skip (GuildOnlyRequest) returns (GuildOnlyReply) {}
-  rpc Stop (GuildOnlyRequest) returns (GuildOnlyReply) {}
+  rpc Skip (GuildOnlyRequest) returns (google.protobuf.Empty) {}
+  rpc Stop (GuildOnlyRequest) returns (google.protobuf.Empty) {}
   rpc Seek (SeekRequest) returns (SeekReply) {}
   rpc GetTracks (GetTracksRequest) returns (GetTracksReply) {}
-  rpc Pause (GuildOnlyRequest) returns (GuildOnlyReply) {}
-  rpc Resume (GuildOnlyRequest) returns (GuildOnlyReply) {}
-  rpc Loop (GuildOnlyRequest) returns (GuildOnlyReply) {}
+  rpc Pause (GuildOnlyRequest) returns (google.protobuf.Empty) {}
+  rpc Resume (GuildOnlyRequest) returns (google.protobuf.Empty) {}
+  rpc Loop (GuildOnlyRequest) returns (google.protobuf.Empty) {}
 }
 
 message RegisterRequest {
@@ -47,8 +48,6 @@ message TrackData {
 message GuildOnlyRequest {
   string guildID = 1;
 }
-
-message GuildOnlyReply {}
 
 message SeekRequest {
   string guildID = 1;

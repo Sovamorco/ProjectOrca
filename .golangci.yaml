@@ -27,7 +27,8 @@ linters-settings:
 
   wrapcheck:
     ignoreSigs:
-    - errors.New
-    - errorx.Decorate
-    - status.Error
-    - status.Errorf
+    - errors.New(
+    - errorx.Decorate(
+    - status.Error(
+    - status.Errorf(
+    - fmt.Errorf(
