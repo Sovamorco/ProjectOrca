@@ -125,6 +125,8 @@ func (q *Queue) add(ctx context.Context, ms *MusicTrack, position int) error {
 	q.Unlock()
 
 	if qlen == 0 { // a.k.a if there were no tracks in the queue before we added this one
+		q.Paused = false // unpause the queue in case it was paused
+
 		go q.start(context.WithoutCancel(ctx))
 
 		return nil
@@ -218,28 +220,28 @@ func (q *Queue) storeLoop(ctx context.Context, done chan struct{}) {
 	}
 }
 
+func (q *Queue) getPacket(ctx context.Context, packet []byte) (*MusicTrack, error) {
+	q.RLock()
+
+	if len(q.Tracks) < 1 {
+		return nil, io.EOF
+	}
+
+	ms := q.Tracks[0]
+
+	q.RUnlock()
+
+	return ms, ms.getPacket(ctx, packet)
+}
+
 func (q *Queue) streamToVC(ctx context.Context) error {
 	q.Logger.Info("Streaming to VC")
 	defer q.Logger.Info("Finished streaming to VC")
 
-	var err error
-
-	var ms *MusicTrack
-
 	packet := make([]byte, packetSize)
 
 	for {
-		q.RLock()
-
-		if len(q.Tracks) < 1 {
-			return nil
-		}
-
-		ms = q.Tracks[0]
-
-		q.RUnlock()
-
-		err = ms.getPacket(ctx, packet)
+		ms, err := q.getPacket(ctx, packet)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				return nil
