@@ -388,7 +388,7 @@ func (o *orcaServer) Play(ctx context.Context, in *pb.PlayRequest) (*pb.PlayRepl
 	}, nil
 }
 
-func (o *orcaServer) Skip(ctx context.Context, in *pb.SkipRequest) (*pb.SkipReply, error) {
+func (o *orcaServer) Skip(ctx context.Context, in *pb.GuildOnlyRequest) (*pb.GuildOnlyReply, error) {
 	state, err := o.getState(ctx)
 	if err != nil {
 		return nil, err
@@ -410,10 +410,10 @@ func (o *orcaServer) Skip(ctx context.Context, in *pb.SkipRequest) (*pb.SkipRepl
 		return nil, ErrInternal
 	}
 
-	return &pb.SkipReply{}, nil
+	return &pb.GuildOnlyReply{}, nil
 }
 
-func (o *orcaServer) Stop(ctx context.Context, in *pb.StopRequest) (*pb.StopReply, error) {
+func (o *orcaServer) Stop(ctx context.Context, in *pb.GuildOnlyRequest) (*pb.GuildOnlyReply, error) {
 	state, err := o.getState(ctx)
 	if err != nil {
 		return nil, err
@@ -435,7 +435,7 @@ func (o *orcaServer) Stop(ctx context.Context, in *pb.StopRequest) (*pb.StopRepl
 		return nil, ErrInternal
 	}
 
-	return &pb.StopReply{}, nil
+	return &pb.GuildOnlyReply{}, nil
 }
 
 func (o *orcaServer) Seek(ctx context.Context, in *pb.SeekRequest) (*pb.SeekReply, error) {
@@ -486,6 +486,7 @@ func (o *orcaServer) GetTracks(ctx context.Context, in *pb.GetTracksRequest) (*p
 		return &pb.GetTracksReply{
 			Tracks:      nil,
 			TotalTracks: 0,
+			Looping:     false,
 		}, nil
 	}
 
@@ -498,6 +499,7 @@ func (o *orcaServer) GetTracks(ctx context.Context, in *pb.GetTracksRequest) (*p
 	end := min(max(int(in.End), start), qlen)
 
 	tracks := gs.Queue.Tracks[start:end]
+	looping := gs.Queue.Loop
 
 	gs.Queue.RUnlock()
 
@@ -510,10 +512,11 @@ func (o *orcaServer) GetTracks(ctx context.Context, in *pb.GetTracksRequest) (*p
 	return &pb.GetTracksReply{
 		Tracks:      res,
 		TotalTracks: int64(qlen),
+		Looping:     looping,
 	}, nil
 }
 
-func (o *orcaServer) Pause(ctx context.Context, in *pb.PauseRequest) (*pb.PauseReply, error) {
+func (o *orcaServer) Pause(ctx context.Context, in *pb.GuildOnlyRequest) (*pb.GuildOnlyReply, error) {
 	state, err := o.getState(ctx)
 	if err != nil {
 		return nil, err
@@ -533,10 +536,10 @@ func (o *orcaServer) Pause(ctx context.Context, in *pb.PauseRequest) (*pb.PauseR
 		return nil, ErrInternal
 	}
 
-	return &pb.PauseReply{}, nil
+	return &pb.GuildOnlyReply{}, nil
 }
 
-func (o *orcaServer) Resume(ctx context.Context, in *pb.ResumeRequest) (*pb.ResumeReply, error) {
+func (o *orcaServer) Resume(ctx context.Context, in *pb.GuildOnlyRequest) (*pb.GuildOnlyReply, error) {
 	state, err := o.getState(ctx)
 	if err != nil {
 		return nil, err
@@ -556,7 +559,36 @@ func (o *orcaServer) Resume(ctx context.Context, in *pb.ResumeRequest) (*pb.Resu
 		return nil, ErrInternal
 	}
 
-	return &pb.ResumeReply{}, nil
+	return &pb.GuildOnlyReply{}, nil
+}
+
+func (o *orcaServer) Loop(ctx context.Context, in *pb.GuildOnlyRequest) (*pb.GuildOnlyReply, error) {
+	state, err := o.getState(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	gs, err := state.GetOrCreateGuildState(ctx, in.GuildID)
+	if err != nil {
+		o.logger.Errorf("Error getting guild state: %+v", err)
+
+		return nil, ErrInternal
+	}
+
+	if gs.Queue == nil {
+		return nil, status.Error(codes.InvalidArgument, "nothing playing")
+	}
+
+	gs.Queue.Loop = !gs.Queue.Loop
+
+	_, err = o.store.NewUpdate().Model(gs.Queue).WherePK().Exec(ctx)
+	if err != nil {
+		o.logger.Errorf("Error storing queue: %+v", err)
+
+		return nil, ErrInternal
+	}
+
+	return &pb.GuildOnlyReply{}, nil
 }
 
 func main() {
@@ -693,7 +725,7 @@ func run(ctx context.Context, logger *zap.SugaredLogger) error { //nolint:funlen
 	}
 }
 
-func (o *orcaServer) forwardRequest(ctx context.Context, call, recip string, req any) (any, error) { //nolint:cyclop
+func (o *orcaServer) forwardRequest(ctx context.Context, call, recip string, req any) (any, error) {
 	o.logger.Debugf("Forwarding request %s to %s", call, recip)
 
 	conn, err := grpc.Dial(
@@ -718,16 +750,10 @@ func (o *orcaServer) forwardRequest(ctx context.Context, call, recip string, req
 		res = new(pb.RegisterReply)
 	case *pb.SeekRequest:
 		res = new(pb.SeekReply)
-	case *pb.SkipRequest:
-		res = new(pb.SkipReply)
-	case *pb.StopRequest:
-		res = new(pb.StopReply)
+	case *pb.GuildOnlyReply:
+		res = new(pb.GuildOnlyReply)
 	case *pb.GetTracksRequest:
 		res = new(pb.GetTracksReply)
-	case *pb.PauseRequest:
-		res = new(pb.PauseReply)
-	case *pb.ResumeRequest:
-		res = new(pb.ResumeReply)
 	}
 
 	err = conn.Invoke(ctx, call, req, res)

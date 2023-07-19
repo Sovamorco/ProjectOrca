@@ -139,34 +139,14 @@ func (ms *MusicTrack) ToProto() *pb.TrackData {
 	}
 }
 
-func (ms *MusicTrack) Seek(pos time.Duration) error {
+func (ms *MusicTrack) Seek(pos time.Duration) {
 	ms.Lock()
 
-	oldCmd, oldStream := ms.CMD, ms.Stream
+	ms.cleanup()
+
 	ms.Pos = pos
-	err := ms.getStream()
 
 	ms.Unlock()
-
-	if err != nil {
-		return errorx.Decorate(err, "get Stream")
-	}
-
-	if oldStream != nil {
-		err = oldStream.Close()
-		if err != nil {
-			ms.Logger.Errorf("Error closing old Stream: %+v", err)
-		}
-	}
-
-	if oldCmd != nil {
-		err = oldCmd.Process.Signal(syscall.SIGTERM)
-		if err != nil {
-			ms.Logger.Errorf("Error killing old ffmpeg: %+v", err)
-		}
-	}
-
-	return nil
 }
 
 func (ms *MusicTrack) Initialize(ctx context.Context) error {
@@ -319,7 +299,7 @@ func (ms *MusicTrack) getFormattedHeaders() string {
 }
 
 // getStream gets a stream for current song on specific position
-// it DOES NOT lock the track, please lock in the caller function.
+// it DOES NOT lock the track, please lock from the caller function.
 func (ms *MusicTrack) getStream() error {
 	ffmpegArgs := []string{
 		"-headers", ms.getFormattedHeaders(),
@@ -377,18 +357,27 @@ func (ms *MusicTrack) getStream() error {
 	return nil
 }
 
+// cleanup cleans up resources used by track, namely stream and process.
+// it DOES NOT lock the track, please lock from the caller function.
 func (ms *MusicTrack) cleanup() {
-	ms.Lock()
-
-	err := ms.Stream.Close()
-	if err != nil && !errors.Is(err, os.ErrClosed) {
-		ms.Logger.Errorf("Error closing Stream: %+v", err)
+	if ms.Stream != nil {
+		err := ms.Stream.Close()
+		if err != nil && !errors.Is(err, os.ErrClosed) {
+			ms.Logger.Errorf("Error closing Stream: %+v", err)
+		}
 	}
 
-	err = ms.CMD.Process.Signal(syscall.SIGTERM)
-	if err != nil {
-		ms.Logger.Errorf("Error killing ffmpeg process: %+v", err)
+	ms.Stream = nil
+
+	if ms.CMD != nil {
+		err := ms.CMD.Process.Signal(syscall.SIGTERM)
+		if err != nil {
+			ms.Logger.Errorf("Error killing ffmpeg process: %+v", err)
+		}
 	}
 
-	ms.Unlock()
+	ms.CMD = nil
+	ms.Pos = 0
+
+	ms.Initialized = false
 }

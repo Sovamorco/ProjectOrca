@@ -163,10 +163,7 @@ func (g *GuildState) Seek(pos time.Duration) error {
 		return ErrSeekLive
 	}
 
-	err := curr.Seek(pos)
-	if err != nil {
-		return errorx.Decorate(err, "seek")
-	}
+	curr.Seek(pos)
 
 	return nil
 }

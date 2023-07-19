@@ -7,12 +7,13 @@ import "google/protobuf/duration.proto";
 service Orca {
   rpc Register (RegisterRequest) returns (RegisterReply) {}
   rpc Play (PlayRequest) returns (PlayReply) {}
-  rpc Skip (SkipRequest) returns (SkipReply) {}
-  rpc Stop (StopRequest) returns (StopReply) {}
+  rpc Skip (GuildOnlyRequest) returns (GuildOnlyReply) {}
+  rpc Stop (GuildOnlyRequest) returns (GuildOnlyReply) {}
   rpc Seek (SeekRequest) returns (SeekReply) {}
   rpc GetTracks (GetTracksRequest) returns (GetTracksReply) {}
-  rpc Pause (PauseRequest) returns (PauseReply) {}
-  rpc Resume (ResumeRequest) returns (ResumeReply) {}
+  rpc Pause (GuildOnlyRequest) returns (GuildOnlyReply) {}
+  rpc Resume (GuildOnlyRequest) returns (GuildOnlyReply) {}
+  rpc Loop (GuildOnlyRequest) returns (GuildOnlyReply) {}
 }
 
 message RegisterRequest {
@@ -43,17 +44,11 @@ message TrackData {
   google.protobuf.Duration duration = 6;
 }
 
-message SkipRequest {
+message GuildOnlyRequest {
   string guildID = 1;
 }
 
-message SkipReply {}
-
-message StopRequest {
-  string guildID = 1;
-}
-
-message StopReply {}
+message GuildOnlyReply {}
 
 message SeekRequest {
   string guildID = 1;
@@ -71,16 +66,5 @@ message GetTracksRequest {
 message GetTracksReply {
   repeated TrackData tracks = 1;
   int64 totalTracks = 2;
+  bool looping = 3;
 }
-
-message PauseRequest {
-  string guildID = 1;
-}
-
-message PauseReply {}
-
-message ResumeRequest {
-  string guildID = 1;
-}
-
-message ResumeReply {}

@@ -37,6 +37,7 @@ type Queue struct {
 	GuildID   string
 	ChannelID string
 	Paused    bool
+	Loop      bool
 	Tracks    []*MusicTrack `bun:"rel:has-many,join:id=queue_id"`
 }
 
@@ -53,6 +54,7 @@ func (g *GuildState) newQueue(ctx context.Context, channelID string) error {
 		GuildID:   g.ID,
 		ChannelID: channelID,
 		Paused:    false,
+		Loop:      false,
 		Tracks:    make([]*MusicTrack, 0),
 	}
 
@@ -153,6 +155,7 @@ func (q *Queue) start(ctx context.Context) {
 	}
 
 	q.VC = vc
+	// if position is somewhere between first and last, put in-between position and position - 1
 
 	defer func(vc *discordgo.VoiceConnection) {
 		err := vc.Disconnect()
@@ -178,25 +181,41 @@ func (q *Queue) start(ctx context.Context) {
 			q.Logger.Errorf("Error when streaming track: %+v", err)
 		}
 
-		q.Lock()
+		q.afterStream(ctx)
+	}
+}
 
-		// check before indexing because of stop call
-		if len(q.Tracks) < 1 {
-			q.Unlock()
+func (q *Queue) afterStream(ctx context.Context) {
+	q.Lock()
+	defer q.Unlock()
 
-			break
+	if len(q.Tracks) < 1 {
+		return
+	}
+
+	// cleanup track resources
+	q.Tracks[0].Lock()
+	q.Tracks[0].cleanup()
+	q.Tracks[0].Unlock()
+
+	if q.Loop {
+		// choosePosition updates track's ordKey
+		_ = q.choosePosition(-1, len(q.Tracks), q.Tracks[0])
+
+		_, err := q.Store.NewUpdate().Model(q.Tracks[0]).WherePK().Exec(ctx)
+		if err != nil {
+			q.Logger.Errorf("Error saving position of track in loop: %+v", err)
 		}
 
-		q.Tracks[0].cleanup()
-
-		_, err = q.Store.NewDelete().Model(q.Tracks[0]).WherePK().Exec(ctx)
+		// move track to last
+		q.Tracks = append(q.Tracks[1:], q.Tracks[0])
+	} else {
+		_, err := q.Store.NewDelete().Model(q.Tracks[0]).WherePK().Exec(ctx)
 		if err != nil {
 			q.Logger.Errorf("Error deleting track from store: %+v", err)
 		}
 
 		q.Tracks = q.Tracks[1:]
-
-		q.Unlock()
 	}
 }
 
@@ -222,14 +241,13 @@ func (q *Queue) storeLoop(ctx context.Context, done chan struct{}) {
 
 func (q *Queue) getPacket(ctx context.Context, packet []byte) (*MusicTrack, error) {
 	q.RLock()
+	defer q.RUnlock()
 
 	if len(q.Tracks) < 1 {
 		return nil, io.EOF
 	}
 
 	ms := q.Tracks[0]
-
-	q.RUnlock()
 
 	return ms, ms.getPacket(ctx, packet)
 }
@@ -265,7 +283,9 @@ func (q *Queue) streamToVC(ctx context.Context) error {
 		}
 
 		if !ms.Live {
+			ms.Lock()
 			ms.Pos += frameSizeMs * time.Millisecond
+			ms.Unlock()
 		}
 	}
 }
@@ -273,6 +293,9 @@ func (q *Queue) streamToVC(ctx context.Context) error {
 // choosePosition chooses position and sets track ordkey based on queue length and desired position.
 // we have to very carefully sanitize position because slices.Insert can panic.
 func (q *Queue) choosePosition(position, qlen int, ms *MusicTrack) int {
+	ms.Lock()
+	defer ms.Unlock()
+
 	// if there are no other tracks in the queue - insert on position 0
 	if qlen == 0 {
 		return 0
