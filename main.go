@@ -526,7 +526,7 @@ func (o *orcaServer) Pause(ctx context.Context, in *pb.PauseRequest) (*pb.PauseR
 		return nil, ErrInternal
 	}
 
-	err = gs.Pause()
+	err = gs.Pause(ctx)
 	if err != nil {
 		o.logger.Errorf("Error pausing: %+v", err)
 
@@ -549,7 +549,7 @@ func (o *orcaServer) Resume(ctx context.Context, in *pb.ResumeRequest) (*pb.Resu
 		return nil, ErrInternal
 	}
 
-	err = gs.Resume()
+	err = gs.Resume(ctx)
 	if err != nil {
 		o.logger.Errorf("Error resuming: %+v", err)
 

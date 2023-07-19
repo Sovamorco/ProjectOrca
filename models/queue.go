@@ -27,16 +27,16 @@ type Queue struct {
 	Logger       *zap.SugaredLogger         `bun:"-"`
 	VC           *discordgo.VoiceConnection `bun:"-"`
 	Store        *store.Store               `bun:"-"`
+	// when playback is paused - queue will wait on resume channel to resume
+	resume chan struct{} `bun:"-"`
 	// stop channel will stop current track playback upon receiving signal
 	stop chan struct{} `bun:"-"`
-	// Playing channel has to have a message for track to be playing
-	// consume message from Playing to pause the track - add it back to resume it
-	Playing chan struct{} `bun:"-"`
 	// -- end non-stored values
 
 	ID        string `bun:",pk"`
 	GuildID   string
 	ChannelID string
+	Paused    bool
 	Tracks    []*MusicTrack `bun:"rel:has-many,join:id=queue_id"`
 }
 
@@ -46,12 +46,13 @@ func (g *GuildState) newQueue(ctx context.Context, channelID string) error {
 		Logger:     g.Logger.Named("queue"),
 		VC:         nil,
 		Store:      g.Store,
+		resume:     make(chan struct{}, 1),
 		stop:       make(chan struct{}, 1),
-		Playing:    make(chan struct{}, 1),
 
 		ID:        uuid.New().String(),
 		GuildID:   g.ID,
 		ChannelID: channelID,
+		Paused:    false,
 		Tracks:    make([]*MusicTrack, 0),
 	}
 
@@ -71,8 +72,8 @@ func (q *Queue) Restore(ctx context.Context, g *GuildState) {
 	q.GuildState = g
 	q.Logger = logger
 	q.Store = q.GuildState.Store
+	q.resume = make(chan struct{}, 1)
 	q.stop = make(chan struct{}, 1)
-	q.Playing = make(chan struct{}, 1)
 
 	for _, track := range q.Tracks {
 		track.Restore(q)
@@ -88,6 +89,30 @@ func (q *Queue) Stop() {
 		return
 	}
 	q.stop <- struct{}{}
+}
+
+func (q *Queue) Pause() {
+	if q.Paused {
+		return
+	}
+
+	if len(q.resume) > 0 {
+		select {
+		case <-q.resume:
+		default:
+		}
+	}
+
+	q.Paused = true
+}
+
+func (q *Queue) Resume() {
+	if !q.Paused || len(q.resume) > 0 {
+		return
+	}
+
+	q.resume <- struct{}{}
+	q.Paused = false
 }
 
 func (q *Queue) add(ctx context.Context, ms *MusicTrack, position int) error {
@@ -142,15 +167,11 @@ func (q *Queue) start(ctx context.Context) {
 	}()
 
 	for {
-		done := make(chan error, 1)
-
 		if len(q.Tracks) < 1 {
 			break
 		}
 
-		q.streamToVC(ctx, done)
-
-		err := <-done
+		err = q.streamToVC(ctx)
 		if err != nil {
 			q.Logger.Errorf("Error when streaming track: %+v", err)
 		}
@@ -197,29 +218,10 @@ func (q *Queue) storeLoop(ctx context.Context, done chan struct{}) {
 	}
 }
 
-// streamToVC initializes first track in the queue and then starts stream loop.
-func (q *Queue) streamToVC(ctx context.Context, done chan error) {
+func (q *Queue) streamToVC(ctx context.Context) error {
 	q.Logger.Info("Streaming to VC")
 	defer q.Logger.Info("Finished streaming to VC")
 
-	defer close(done)
-
-	if len(q.Tracks) < 1 {
-		return
-	}
-
-	// start the track if not playing
-	if len(q.Playing) < 1 {
-		q.Playing <- struct{}{}
-	}
-
-	err := q.streamLoop(ctx)
-	if err != nil {
-		done <- errorx.Decorate(err, "stream")
-	}
-}
-
-func (q *Queue) streamLoop(ctx context.Context) error {
 	var err error
 
 	var ms *MusicTrack
@@ -246,9 +248,13 @@ func (q *Queue) streamLoop(ctx context.Context) error {
 			return errorx.Decorate(err, "get packet")
 		}
 
-		// consume into itself to check that it has a value
-		// if the value is missing - wait for it to be present
-		q.Playing <- <-q.Playing
+		if q.Paused {
+			select {
+			case <-q.stop:
+				return nil
+			case <-q.resume:
+			}
+		}
 
 		select {
 		case <-q.stop:

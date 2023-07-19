@@ -2,7 +2,6 @@ package models
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"ProjectOrca/store"
@@ -28,13 +27,6 @@ type GuildState struct {
 	BotID   string
 	Queue   *Queue `bun:"rel:has-one,join:id=guild_id"`
 }
-
-var (
-	ErrNotPlaying    = errors.New("nothing playing")
-	ErrSeekLive      = errors.New("cannot seek live track")
-	ErrNotPaused     = errors.New("not paused")
-	ErrAlreadyPaused = errors.New("already paused")
-)
 
 func (s *BotState) NewGuildState(ctx context.Context, guildID string) (*GuildState, error) {
 	// basically check if bot is in guild
@@ -179,30 +171,32 @@ func (g *GuildState) Seek(pos time.Duration) error {
 	return nil
 }
 
-func (g *GuildState) Pause() error {
+func (g *GuildState) Pause(ctx context.Context) error {
 	if g.Queue == nil || len(g.Queue.Tracks) < 1 {
 		return ErrNotPlaying
 	}
 
-	if len(g.Queue.Playing) < 1 {
-		return ErrAlreadyPaused
-	}
+	g.Queue.Pause()
 
-	<-g.Queue.Playing
+	_, err := g.Store.NewUpdate().Model(g.Queue).WherePK().Exec(ctx)
+	if err != nil {
+		return errorx.Decorate(err, "store paused state")
+	}
 
 	return nil
 }
 
-func (g *GuildState) Resume() error {
+func (g *GuildState) Resume(ctx context.Context) error {
 	if g.Queue == nil || len(g.Queue.Tracks) < 1 {
 		return ErrNotPlaying
 	}
 
-	if len(g.Queue.Playing) > 0 {
-		return ErrNotPaused
-	}
+	g.Queue.Resume()
 
-	g.Queue.Playing <- struct{}{}
+	_, err := g.Store.NewUpdate().Model(g.Queue).WherePK().Exec(ctx)
+	if err != nil {
+		return errorx.Decorate(err, "store paused state")
+	}
 
 	return nil
 }
