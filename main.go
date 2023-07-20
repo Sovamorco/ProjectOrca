@@ -483,18 +483,16 @@ func (o *orcaServer) GetTracks(ctx context.Context, in *pb.GetTracksRequest) (*p
 		}, nil
 	}
 
-	gs.Queue.RLock()
+	queue := gs.Queue.GetTracks()
 
-	qlen := len(gs.Queue.Tracks)
+	qlen := len(queue)
 	// start has to be at least 0 and at most qlen
 	start := min(max(int(in.Start), 0), qlen)
 	// end has to be at least start and at most qlen
 	end := min(max(int(in.End), start), qlen)
 
-	tracks := gs.Queue.Tracks[start:end]
-	looping := gs.Queue.Loop
-
-	gs.Queue.RUnlock()
+	tracks := queue[start:end]
+	looping := gs.Queue.GetLoop()
 
 	res := make([]*pb.TrackData, 0, len(tracks))
 
@@ -572,11 +570,10 @@ func (o *orcaServer) Loop(ctx context.Context, in *pb.GuildOnlyRequest) (*emptyp
 		return nil, status.Error(codes.InvalidArgument, "nothing playing")
 	}
 
-	gs.Queue.Loop = !gs.Queue.Loop
+	err = gs.Queue.FlipLoop(ctx)
 
-	_, err = o.store.NewUpdate().Model(gs.Queue).Column("loop").WherePK().Exec(ctx)
 	if err != nil {
-		o.logger.Errorf("Error storing queue: %+v", err)
+		o.logger.Errorf("Error flipping loop state: %+v", err)
 
 		return nil, ErrInternal
 	}

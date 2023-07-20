@@ -14,9 +14,11 @@ import (
 type BotState struct {
 	bun.BaseModel `bun:"table:bots" exhaustruct:"optional"`
 
-	Logger  *zap.SugaredLogger `bun:"-"` // do not store logger
-	Session *discordgo.Session `bun:"-"` // do not store session
-	Store   *store.Store       `bun:"-"` // do not store the store
+	// -- private non-stored values
+	logger  *zap.SugaredLogger
+	session *discordgo.Session
+	store   *store.Store
+	// -- end private non-stored values
 
 	Guilds        []*GuildState `bun:"rel:has-many,join:id=bot_id"`
 	ID            string        `bun:",pk"`
@@ -36,9 +38,9 @@ func NewState(
 	lockerAddress string,
 ) (*BotState, error) {
 	s := BotState{
-		Logger:        logger,
-		Session:       nil,
-		Store:         store,
+		logger:        logger,
+		session:       nil,
+		store:         store,
 		Guilds:        make([]*GuildState, 0),
 		ID:            "", // is set by CreateSession
 		StateToken:    stateToken,
@@ -52,7 +54,7 @@ func NewState(
 		return nil, errorx.Decorate(err, "create session")
 	}
 
-	s.Session = session
+	s.session = session
 	logger = logger.Named("bot_state")
 	logger.Infof("Started the bot")
 
@@ -80,8 +82,8 @@ func (s *BotState) CreateSession() (*discordgo.Session, error) {
 	}
 
 	s.ID = session.State.User.ID
-	s.Logger = s.Logger.With("bot_id", s.ID)
-	s.Logger.Infof("Started bot")
+	s.logger = s.logger.With("bot_id", s.ID)
+	s.logger.Infof("Started bot")
 
 	return session, nil
 }
@@ -92,15 +94,15 @@ func (s *BotState) Restore(ctx context.Context, logger *zap.SugaredLogger, store
 
 	logger.Infow("Restoring bot state", "bot_id", s.ID)
 
-	s.Logger = logger
-	s.Store = store
+	s.logger = logger
+	s.store = store
 
 	session, err := s.CreateSession()
 	if err != nil {
 		return errorx.Decorate(err, "create session")
 	}
 
-	s.Session = session
+	s.session = session
 
 	for _, gs := range s.Guilds {
 		gs.Restore(ctx, s)
@@ -116,9 +118,9 @@ func (s *BotState) GracefulShutdown() {
 		gs.gracefulShutdown()
 	}
 
-	err = s.Session.Close()
+	err = s.session.Close()
 	if err != nil {
-		s.Logger.Errorf("Error closing session: %+v", err)
+		s.logger.Errorf("Error closing session: %+v", err)
 	}
 }
 
