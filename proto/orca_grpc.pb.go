@@ -23,7 +23,8 @@ const _ = grpc.SupportPackageIsVersion7
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type OrcaClient interface {
-	Register(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (*RegisterReply, error)
+	Join(ctx context.Context, in *JoinRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	Leave(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	Play(ctx context.Context, in *PlayRequest, opts ...grpc.CallOption) (*PlayReply, error)
 	Skip(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	Stop(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
@@ -43,9 +44,18 @@ func NewOrcaClient(cc grpc.ClientConnInterface) OrcaClient {
 	return &orcaClient{cc}
 }
 
-func (c *orcaClient) Register(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (*RegisterReply, error) {
-	out := new(RegisterReply)
-	err := c.cc.Invoke(ctx, "/orca.Orca/Register", in, out, opts...)
+func (c *orcaClient) Join(ctx context.Context, in *JoinRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, "/orca.Orca/Join", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *orcaClient) Leave(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, "/orca.Orca/Leave", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +147,8 @@ func (c *orcaClient) ShuffleQueue(ctx context.Context, in *GuildOnlyRequest, opt
 // All implementations must embed UnimplementedOrcaServer
 // for forward compatibility
 type OrcaServer interface {
-	Register(context.Context, *RegisterRequest) (*RegisterReply, error)
+	Join(context.Context, *JoinRequest) (*emptypb.Empty, error)
+	Leave(context.Context, *GuildOnlyRequest) (*emptypb.Empty, error)
 	Play(context.Context, *PlayRequest) (*PlayReply, error)
 	Skip(context.Context, *GuildOnlyRequest) (*emptypb.Empty, error)
 	Stop(context.Context, *GuildOnlyRequest) (*emptypb.Empty, error)
@@ -154,8 +165,11 @@ type OrcaServer interface {
 type UnimplementedOrcaServer struct {
 }
 
-func (UnimplementedOrcaServer) Register(context.Context, *RegisterRequest) (*RegisterReply, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Register not implemented")
+func (UnimplementedOrcaServer) Join(context.Context, *JoinRequest) (*emptypb.Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Join not implemented")
+}
+func (UnimplementedOrcaServer) Leave(context.Context, *GuildOnlyRequest) (*emptypb.Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Leave not implemented")
 }
 func (UnimplementedOrcaServer) Play(context.Context, *PlayRequest) (*PlayReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Play not implemented")
@@ -197,20 +211,38 @@ func RegisterOrcaServer(s grpc.ServiceRegistrar, srv OrcaServer) {
 	s.RegisterService(&Orca_ServiceDesc, srv)
 }
 
-func _Orca_Register_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(RegisterRequest)
+func _Orca_Join_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(JoinRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(OrcaServer).Register(ctx, in)
+		return srv.(OrcaServer).Join(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/orca.Orca/Register",
+		FullMethod: "/orca.Orca/Join",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(OrcaServer).Register(ctx, req.(*RegisterRequest))
+		return srv.(OrcaServer).Join(ctx, req.(*JoinRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Orca_Leave_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GuildOnlyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrcaServer).Leave(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/orca.Orca/Leave",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrcaServer).Leave(ctx, req.(*GuildOnlyRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -385,8 +417,12 @@ var Orca_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*OrcaServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "Register",
-			Handler:    _Orca_Register_Handler,
+			MethodName: "Join",
+			Handler:    _Orca_Join_Handler,
+		},
+		{
+			MethodName: "Leave",
+			Handler:    _Orca_Leave_Handler,
 		},
 		{
 			MethodName: "Play",

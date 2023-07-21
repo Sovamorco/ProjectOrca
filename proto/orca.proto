@@ -6,7 +6,8 @@ import "google/protobuf/duration.proto";
 import "google/protobuf/empty.proto";
 
 service Orca {
-  rpc Register (RegisterRequest) returns (RegisterReply) {}
+  rpc Join (JoinRequest) returns (google.protobuf.Empty) {}
+  rpc Leave (GuildOnlyRequest) returns (google.protobuf.Empty) {}
   rpc Play (PlayRequest) returns (PlayReply) {}
   rpc Skip (GuildOnlyRequest) returns (google.protobuf.Empty) {}
   rpc Stop (GuildOnlyRequest) returns (google.protobuf.Empty) {}
@@ -18,12 +19,9 @@ service Orca {
   rpc ShuffleQueue(GuildOnlyRequest) returns (google.protobuf.Empty) {}
 }
 
-message RegisterRequest {
-  string token = 1;
-}
-
-message RegisterReply {
-  string token = 1;
+message JoinRequest {
+  string guildID = 1;
+  string channelID = 2;
 }
 
 message PlayRequest {
@@ -40,10 +38,9 @@ message PlayReply {
 message TrackData {
   string title = 1;
   string originalURL = 2;
-  string url = 3;
-  bool live = 4;
-  google.protobuf.Duration position = 5;
-  google.protobuf.Duration duration = 6;
+  bool live = 3;
+  google.protobuf.Duration position = 4;
+  google.protobuf.Duration duration = 5;
 }
 
 message GuildOnlyRequest {

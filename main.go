@@ -9,17 +9,18 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"reflect"
 	"sync"
 	"syscall"
 	"time"
 
-	"ProjectOrca/migrations"
-	"ProjectOrca/models"
-	"ProjectOrca/store"
 	"ProjectOrca/utils"
 
+	"google.golang.org/protobuf/types/known/emptypb"
+
+	"ProjectOrca/migrations"
+	"ProjectOrca/models"
 	pb "ProjectOrca/proto"
+	"ProjectOrca/store"
 
 	"github.com/google/uuid"
 	"github.com/joomcode/errorx"
@@ -30,52 +31,61 @@ import (
 	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/types/known/emptypb"
-)
-
-type key int
-
-const (
-	MigrationsTimeout   = time.Second * 300
-	DeathrattlesChannel = "deathrattles"
-
-	KeyState key = iota
-	KeyBotID
-	KeyFullMethod
-)
-
-var (
-	ErrInternal  = status.Error(codes.Internal, "internal error")
-	ErrNoAddress = errors.New("could not get address")
 )
 
 type DeathrattleMessage struct {
 	Deceased string `json:"deceased"`
 }
 
-func newOrcaServer(logger *zap.SugaredLogger, st *store.Store, address string) *orcaServer {
-	serverLogger := logger.Named("server")
+type ResyncTarget int
 
-	return &orcaServer{
-		id:      uuid.New().String(),
-		address: address,
-		states:  make(map[string]*models.BotState),
-		logger:  serverLogger,
-		store:   st,
-	}
+type ResyncMessage struct {
+	Bot     string         `json:"bot"`
+	Guild   string         `json:"guild"`
+	Targets []ResyncTarget `json:"targets"`
+	// the only way I found to properly do seeking
+	// if I don't pass it here storeLoop overwrites changes made by the seek call
+	SeekPos time.Duration `json:"seek_pos"`
 }
+
+const (
+	MigrationsTimeout   = time.Second * 300
+	DeathrattlesChannel = "deathrattles"
+	ResyncsChannel      = "resync"
+
+	edgeOrdKeyDiff    = 100
+	defaultPrevOrdKey = 0
+	defaultNextOrdKey = defaultPrevOrdKey + edgeOrdKeyDiff
+)
+
+// resync targets.
+const (
+	ResyncTargetCurrent ResyncTarget = iota
+	ResyncTargetGuild
+)
+
+var ErrInternal = status.Error(codes.Internal, "internal error")
 
 type orcaServer struct {
 	pb.UnimplementedOrcaServer `exhaustruct:"optional"`
 
-	id      string
-	address string
-	states  map[string]*models.BotState
-	logger  *zap.SugaredLogger
-	store   *store.Store
+	id     string
+	states []*models.Bot
+	logger *zap.SugaredLogger
+	store  *store.Store
+}
+
+func newOrcaServer(logger *zap.SugaredLogger, st *store.Store) *orcaServer {
+	serverLogger := logger.Named("server")
+
+	return &orcaServer{
+		id:     uuid.New().String(),
+		states: make([]*models.Bot, 0),
+		logger: serverLogger,
+		store:  st,
+	}
 }
 
 func (o *orcaServer) gracefulShutdown(ctx context.Context) {
@@ -85,10 +95,9 @@ func (o *orcaServer) gracefulShutdown(ctx context.Context) {
 
 	_, err := o.store.
 		NewUpdate().
-		Model((*models.BotState)(nil)).
+		Model((*models.RemoteBot)(nil)).
 		Where("locker = ?", o.id).
 		Set("locker = NULL").
-		Set("locker_address = NULL").
 		Exec(ctx)
 	if err != nil {
 		o.logger.Errorf("Error unlocking bots: %+v", err)
@@ -96,17 +105,7 @@ func (o *orcaServer) gracefulShutdown(ctx context.Context) {
 
 	o.store.Unsubscribe(ctx)
 
-	b, err := json.Marshal(DeathrattleMessage{
-		Deceased: o.id,
-	})
-	if err != nil {
-		o.logger.Errorf("Error marshalling deathrattle: %+v", err)
-	} else {
-		err = o.store.Publish(ctx, DeathrattlesChannel, b).Err()
-		if err != nil {
-			o.logger.Errorf("Error publishing deathrattle: %+v", err)
-		}
-	}
+	o.sendDeathrattle(ctx)
 
 	o.store.GracefulShutdown()
 }
@@ -114,291 +113,331 @@ func (o *orcaServer) gracefulShutdown(ctx context.Context) {
 func (o *orcaServer) initFromStore(ctx context.Context) error {
 	_, err := o.store.
 		NewUpdate().
-		Model((*models.BotState)(nil)).
-		Where("locker IS NULL OR locker_address = ?", o.address).
+		Model((*models.RemoteBot)(nil)).
+		Where("locker IS NULL").
 		Set("locker = ?", o.id).
-		Set("locker_address = ?", o.address).
 		Exec(ctx)
 	if err != nil {
 		return errorx.Decorate(err, "lock states")
 	}
 
-	states := make([]*models.BotState, 0)
+	states := make([]*models.RemoteBot, 0)
 
 	err = o.store.
 		NewSelect().
 		Model(&states).
 		Where("locker = ?", o.id).
-		Relation("Guilds").
-		Relation("Guilds.Queue").
-		Relation("Guilds.Queue.Tracks", func(q *bun.SelectQuery) *bun.SelectQuery {
-			return q.Order("ord_key ASC")
-		}).
 		Scan(ctx)
 	if err != nil {
 		return errorx.Decorate(err, "list bot states")
 	}
 
 	for _, state := range states {
-		if _, ok := o.states[state.ID]; ok {
+		if s := o.getStateByToken(state.Token); s != nil {
 			// state already controlled, no need to init
 			continue
 		}
 
-		err = state.Restore(ctx, o.logger, o.store)
+		localState, err := models.NewBot(o.logger, o.store, state.Token)
 		if err != nil {
-			return errorx.Decorate(err, "restore state")
+			o.logger.Errorf("Could not create local state for remote state %s: %+v", state.ID, err)
 		}
 
-		o.states[state.ID] = state
+		o.states = append(o.states, localState)
+
+		go localState.FullResync(ctx)
 	}
 
 	return nil
 }
 
-func (o *orcaServer) parseIncomingContext(ctx context.Context) (string, string, error) {
+func (o *orcaServer) getStateByToken(token string) *models.Bot {
+	for _, state := range o.states {
+		if state.GetToken() == token {
+			return state
+		}
+	}
+
+	return nil
+}
+
+// do not use for authentication-related purposes.
+func (o *orcaServer) getStateByID(id string) *models.Bot {
+	for _, state := range o.states {
+		if state.GetID() == id {
+			return state
+		}
+	}
+
+	return nil
+}
+
+func (o *orcaServer) parseIncomingContext(ctx context.Context) (string, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		o.logger.Debug("missing metadata")
 
-		return "", "", status.Error(codes.Unauthenticated, "missing metadata")
+		return "", status.Error(codes.Unauthenticated, "missing metadata")
 	}
 
 	tokenS := md.Get("token")
 	if len(tokenS) != 1 {
 		o.logger.Debug("missing token")
 
-		return "", "", status.Error(codes.Unauthenticated, "missing token")
+		return "", status.Error(codes.Unauthenticated, "missing token")
 	}
 
 	token := tokenS[0]
 
-	botIDS := md.Get("botID")
-	if len(botIDS) != 1 {
-		o.logger.Debug("missing bot id")
-
-		return "", "", status.Error(codes.Unauthenticated, "missing bot id")
-	}
-
-	botID := botIDS[0]
-
-	return botID, token, nil
+	return token, nil
 }
 
-func (o *orcaServer) getStateAuth(ctx context.Context, botID string) (*models.BotState, error) {
-	state := new(models.BotState)
-	state.ID = botID
+func (o *orcaServer) authenticate(ctx context.Context) (*models.RemoteBot, error) {
+	token, err := o.parseIncomingContext(ctx)
+	if err != nil {
+		return nil, errorx.Decorate(err, "parse context")
+	}
 
-	err := o.store.NewSelect().Model(state).WherePK().Scan(ctx)
+	var s models.RemoteBot
+
+	err = o.store.
+		NewSelect().
+		Model(&s).
+		Where("token = ?", token).
+		Scan(ctx)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			o.logger.Debug("not registered")
-
-			return nil, status.Error(codes.Unauthenticated, "not registered")
+			return o.register(ctx, token)
 		}
 
-		o.logger.Errorf("Error getting state from store: %+v", err)
+		return nil, errorx.Decorate(err, "get state from store")
+	}
+
+	return &s, nil
+}
+
+func (o *orcaServer) authenticateWithGuild(ctx context.Context, guildID string) (
+	*models.RemoteBot,
+	*models.RemoteGuild,
+	error,
+) {
+	bot, err := o.authenticate(ctx)
+	if err != nil {
+		return nil, nil, errorx.Decorate(err, "authenticate bot")
+	}
+
+	var r models.RemoteGuild
+	r.ID = guildID
+	r.BotID = bot.ID
+
+	err = o.store.
+		NewSelect().
+		Model(&r).
+		WherePK().
+		Scan(ctx)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			g := models.NewRemoteGuild(bot.ID, guildID)
+
+			_, err = o.store.
+				NewInsert().
+				Model(g).
+				Exec(ctx)
+			if err != nil {
+				return nil, nil, errorx.Decorate(err, "create guild")
+			}
+
+			return bot, g, nil
+		}
+
+		return nil, nil, errorx.Decorate(err, "get guild from store")
+	}
+
+	return bot, &r, nil
+}
+
+func (o *orcaServer) register(ctx context.Context, token string) (*models.RemoteBot, error) {
+	state, err := models.NewBot(o.logger, o.store, token)
+	if err != nil {
+		return nil, errorx.Decorate(err, "create local bot state")
+	}
+
+	r := models.NewRemoteBot(state.GetID(), state.GetToken(), o.id)
+
+	_, err = o.store.
+		NewInsert().
+		Model(r).
+		Exec(ctx)
+	if err != nil {
+		state.GracefulShutdown()
+
+		return nil, errorx.Decorate(err, "store remote bot state")
+	}
+
+	o.states = append(o.states, state)
+
+	return r, nil
+}
+
+func (o *orcaServer) Join(ctx context.Context, in *pb.JoinRequest) (*emptypb.Empty, error) {
+	bot, guild, err := o.authenticateWithGuild(ctx, in.GuildID)
+	if err != nil {
+		o.logger.Errorf("Error authenticating request: %+v", err)
+
+		return nil, status.Error(codes.Unauthenticated, "failed to authenticate bot")
+	}
+
+	if guild.ChannelID == in.ChannelID {
+		return &emptypb.Empty{}, nil
+	}
+
+	_, err = guild.UpdateQuery(o.store).
+		Set("channel_id = ?", in.ChannelID).
+		Exec(ctx)
+	if err != nil {
+		o.logger.Errorf("Error updating guild channel id: %+v", err)
 
 		return nil, ErrInternal
 	}
 
-	return state, nil
-}
-
-func (o *orcaServer) authLogInterceptor(
-	ctx context.Context,
-	req any,
-	serverInfo *grpc.UnaryServerInfo,
-	handler grpc.UnaryHandler,
-) (any, error) {
-	o.logger.Debugf("Request to %s", serverInfo.FullMethod)
-
-	ctx = context.WithValue(ctx, KeyFullMethod, serverInfo.FullMethod)
-
-	botID, token, err := o.parseIncomingContext(ctx)
+	err = o.sendResync(ctx, bot.ID, guild.ID, ResyncTargetGuild)
 	if err != nil {
-		return nil, err
-	}
-
-	ctx = context.WithValue(ctx, KeyBotID, botID)
-
-	if _, ok := req.(*pb.RegisterRequest); token == "" && ok {
-		res, err := handler(ctx, req)
-		if err != nil {
-			o.logger.Debugf("Returning error: %+v", err)
-		}
-
-		return res, err
-	}
-
-	state, err := o.getStateAuth(ctx, botID)
-	if err != nil {
-		return nil, err
-	}
-
-	if state.StateToken != token {
-		o.logger.Debug("invalid token")
-
-		return nil, status.Error(codes.Unauthenticated, "invalid token")
-	}
-
-	if state.Locker != o.id {
-		res := make([]byte, 0)
-
-		err = o.forwardRequest(ctx, serverInfo.FullMethod, state.LockerAddress, req, &res)
-		if err != nil {
-			o.logger.Debugf("Returning error: %+v", err)
-		}
-
-		return res, err
-	}
-
-	state = o.states[botID]
-
-	res, err := handler(context.WithValue(ctx, KeyState, state), req)
-	if err != nil {
-		o.logger.Debugf("Returning error: %+v", err)
-	}
-
-	return res, err
-}
-
-func (o *orcaServer) registerNew(
-	ctx context.Context,
-	in *pb.RegisterRequest,
-	botID, token string,
-) (*pb.RegisterReply, error) {
-	state, err := models.NewState(ctx, o.logger, o.store, in.Token, token, o.id, o.address)
-	if err != nil {
-		o.logger.Errorf("Error creating state: %+v", err)
+		o.logger.Errorf("Error sending resync request: %+v", err)
 
 		return nil, ErrInternal
 	}
 
-	o.states[botID] = state
-
-	return &pb.RegisterReply{
-		Token: token,
-	}, nil
+	return &emptypb.Empty{}, nil
 }
 
-func (o *orcaServer) reregister(
-	ctx context.Context,
-	in *pb.RegisterRequest,
-	existing *models.BotState,
-	token string,
-) (*pb.RegisterReply, error) {
-	if existing.Locker != o.id {
-		fullMethod, err := o.getString(ctx, KeyFullMethod)
-		if err != nil {
-			return nil, err
-		}
-
-		res := new(pb.RegisterReply)
-		err = o.forwardRequest(ctx, fullMethod, existing.LockerAddress, in, res)
-
-		return res, err
-	}
-
-	existing = o.states[existing.ID]
-
-	o.logger.Infof("Bot %s already registered, reregestering", existing.ID)
-
-	if in.Token != existing.Token {
-		return nil, status.Error(codes.Unauthenticated, "invalid token")
-	}
-
-	existing.StateToken = token
-
-	_, err := o.store.NewUpdate().Model(existing).Column("state_token").WherePK().Exec(ctx)
+func (o *orcaServer) Leave(ctx context.Context, in *pb.GuildOnlyRequest) (*emptypb.Empty, error) {
+	bot, guild, err := o.authenticateWithGuild(ctx, in.GuildID)
 	if err != nil {
-		o.logger.Errorf("Error getting guild state: %+v", err)
+		o.logger.Errorf("Error authenticating request: %+v", err)
+
+		return nil, status.Error(codes.Unauthenticated, "failed to authenticate bot")
+	}
+
+	if guild.ChannelID == "" {
+		return &emptypb.Empty{}, nil
+	}
+
+	_, err = guild.
+		UpdateQuery(o.store).
+		Set("channel_id = NULL").
+		Exec(ctx)
+	if err != nil {
+		o.logger.Errorf("Error updating guild: %+v", err)
 
 		return nil, ErrInternal
 	}
 
-	return &pb.RegisterReply{
-		Token: token,
-	}, nil
-}
-
-func (o *orcaServer) Register(ctx context.Context, in *pb.RegisterRequest) (*pb.RegisterReply, error) {
-	botID, err := o.getString(ctx, KeyBotID)
+	err = o.sendResync(ctx, bot.ID, guild.ID, ResyncTargetGuild)
 	if err != nil {
-		return nil, err
-	}
-
-	o.logger.Infof("Received registration request for bot %s", botID)
-
-	newToken, err := utils.GenerateSecureToken()
-	if err != nil {
-		o.logger.Errorf("Error generating token: %+v", err)
+		o.logger.Errorf("Error sending resync request: %+v", err)
 
 		return nil, ErrInternal
 	}
 
-	state := new(models.BotState)
-	state.ID = botID
-
-	err = o.store.NewSelect().Model(state).WherePK().Scan(ctx)
-	if err != nil {
-		if !errors.Is(err, sql.ErrNoRows) {
-			o.logger.Errorf("Error getting state from store: %+v", err)
-
-			return nil, ErrInternal
-		}
-
-		return o.registerNew(ctx, in, botID, newToken)
-	}
-
-	return o.reregister(ctx, in, state, newToken)
+	return &emptypb.Empty{}, nil
 }
 
 func (o *orcaServer) Play(ctx context.Context, in *pb.PlayRequest) (*pb.PlayReply, error) {
-	state, err := o.getState(ctx)
+	bot, guild, err := o.authenticateWithGuild(ctx, in.GuildID)
 	if err != nil {
-		return nil, err
+		o.logger.Errorf("Error authenticating request: %+v", err)
+
+		return nil, status.Error(codes.Unauthenticated, "failed to authenticate bot")
 	}
 
-	o.logger.Infof("Playing \"%s\" in channel %s guild %s", in.Url, in.ChannelID, in.GuildID)
-
-	gs, err := state.GetOrCreateGuildState(ctx, in.GuildID)
+	tracks, err := models.NewRemoteTracks(o.logger, bot.ID, guild.ID, in.Url)
 	if err != nil {
-		o.logger.Errorf("Error getting guild state: %+v", err)
+		o.logger.Errorf("Error getting remote tracks: %+v", err)
 
 		return nil, ErrInternal
 	}
 
-	tracksData, err := gs.PlayTracks(ctx, in.ChannelID, in.Url, int(in.Position))
-	if err != nil {
-		o.logger.Errorf("Error playing track: %+v", err)
+	qlen, err := o.store.
+		NewSelect().
+		Model((*models.RemoteTrack)(nil)).
+		Where("bot_id = ? AND guild_id = ?", bot.ID, guild.ID).
+		Count(ctx)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		o.logger.Errorf("Error getting tracks from store: %+v", err)
 
 		return nil, ErrInternal
+	}
+
+	prevOrdKey, nextOrdKey := o.chooseOrdKeyRange(ctx, qlen, int(in.Position))
+
+	models.SetOrdKeys(tracks, prevOrdKey, nextOrdKey)
+
+	_, err = o.store.
+		NewInsert().
+		Model(&tracks).
+		Exec(ctx)
+	if err != nil {
+		o.logger.Errorf("Error storing tracks: %+v", err)
+
+		return nil, ErrInternal
+	}
+
+	res := make([]*pb.TrackData, len(tracks))
+	for i, track := range tracks {
+		res[i] = track.ToProto()
+	}
+
+	// that concerns current track
+	if qlen == 0 || in.Position == 0 {
+		err = o.sendResync(ctx, bot.ID, guild.ID, ResyncTargetCurrent)
+
+		if err != nil {
+			o.logger.Errorf("Error sending resync message: %+v", err)
+
+			return nil, ErrInternal
+		}
 	}
 
 	return &pb.PlayReply{
-		Tracks: tracksData,
+		Tracks: res,
 	}, nil
 }
 
 func (o *orcaServer) Skip(ctx context.Context, in *pb.GuildOnlyRequest) (*emptypb.Empty, error) {
-	state, err := o.getState(ctx)
+	bot, guild, err := o.authenticateWithGuild(ctx, in.GuildID)
 	if err != nil {
-		return nil, err
+		o.logger.Errorf("Error authenticating request: %+v", err)
+
+		return nil, status.Error(codes.Unauthenticated, "failed to authenticate bot")
 	}
 
 	o.logger.Infof("Skipping track in guild %s", in.GuildID)
 
-	gs, err := state.GetOrCreateGuildState(ctx, in.GuildID)
-	if err != nil {
-		o.logger.Errorf("Error getting guild state: %+v", err)
+	var current models.RemoteTrack
+
+	err = o.store.
+		NewSelect().
+		Model(&current).
+		Where("bot_id = ? AND guild_id = ?", bot.ID, guild.ID).
+		Order("ord_key").
+		Limit(1).
+		Scan(ctx)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		o.logger.Errorf("Error getting current track: %+v", err)
 
 		return nil, ErrInternal
 	}
 
-	err = gs.Skip()
+	err = current.DeleteOrRequeue(ctx, o.store)
 	if err != nil {
-		o.logger.Errorf("Error skipping: %+v", err)
+		o.logger.Errorf("Error deleting or requeuing current track: %+v", err)
+
+		return nil, ErrInternal
+	}
+
+	err = o.sendResync(ctx, bot.ID, guild.ID, ResyncTargetCurrent)
+	if err != nil {
+		o.logger.Errorf("Error sending resync message: %+v", err)
 
 		return nil, ErrInternal
 	}
@@ -407,23 +446,29 @@ func (o *orcaServer) Skip(ctx context.Context, in *pb.GuildOnlyRequest) (*emptyp
 }
 
 func (o *orcaServer) Stop(ctx context.Context, in *pb.GuildOnlyRequest) (*emptypb.Empty, error) {
-	state, err := o.getState(ctx)
+	bot, guild, err := o.authenticateWithGuild(ctx, in.GuildID)
 	if err != nil {
-		return nil, err
+		o.logger.Errorf("Error authenticating request: %+v", err)
+
+		return nil, status.Error(codes.Unauthenticated, "failed to authenticate bot")
 	}
 
 	o.logger.Infof("Stopping playback in guild %s", in.GuildID)
 
-	gs, err := state.GetOrCreateGuildState(ctx, in.GuildID)
-	if err != nil {
-		o.logger.Errorf("Error getting guild state: %+v", err)
+	_, err = o.store.
+		NewDelete().
+		Model((*models.RemoteTrack)(nil)).
+		Where("bot_id = ? AND guild_id = ?", bot.ID, guild.ID).
+		Exec(ctx)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		o.logger.Errorf("Error deleting all tracks: %+v", err)
 
 		return nil, ErrInternal
 	}
 
-	err = gs.Stop(ctx)
+	err = o.sendResync(ctx, bot.ID, guild.ID, ResyncTargetCurrent)
 	if err != nil {
-		o.logger.Errorf("Error stopping: %+v", err)
+		o.logger.Errorf("Error sending resync message: %+v", err)
 
 		return nil, ErrInternal
 	}
@@ -432,29 +477,32 @@ func (o *orcaServer) Stop(ctx context.Context, in *pb.GuildOnlyRequest) (*emptyp
 }
 
 func (o *orcaServer) Seek(ctx context.Context, in *pb.SeekRequest) (*pb.SeekReply, error) {
-	state, err := o.getState(ctx)
+	bot, guild, err := o.authenticateWithGuild(ctx, in.GuildID)
 	if err != nil {
-		return nil, err
+		o.logger.Errorf("Error authenticating request: %+v", err)
+
+		return nil, status.Error(codes.Unauthenticated, "failed to authenticate bot")
 	}
 
 	o.logger.Infof("Seeking to %.2fs in guild %s", in.Position.AsDuration().Seconds(), in.GuildID)
 
-	gs, err := state.GetOrCreateGuildState(ctx, in.GuildID)
+	_, err = o.store.
+		NewUpdate().
+		Model((*models.RemoteTrack)(nil)).
+		ModelTableExpr("tracks").
+		TableExpr("(?) as curr", guild.CurrentTrackQuery(o.store)).
+		Set("tracks.pos = ?", in.Position.AsDuration()).
+		Where("tracks.id = curr.id").
+		Exec(ctx)
 	if err != nil {
-		o.logger.Errorf("Error getting guild state: %+v", err)
+		o.logger.Errorf("Error changing track position: %+v", err)
 
 		return nil, ErrInternal
 	}
 
-	tc := in.Position.AsDuration()
-
-	err = gs.Seek(ctx, tc)
+	err = o.sendResyncSeek(ctx, bot.ID, guild.ID, in.Position.AsDuration(), ResyncTargetCurrent)
 	if err != nil {
-		if errors.Is(err, models.ErrSeekLive) {
-			return nil, status.Error(codes.InvalidArgument, "cannot seek live")
-		}
-
-		o.logger.Errorf("Error seeking: %+v", err)
+		o.logger.Errorf("Error sending resync target")
 
 		return nil, ErrInternal
 	}
@@ -462,118 +510,19 @@ func (o *orcaServer) Seek(ctx context.Context, in *pb.SeekRequest) (*pb.SeekRepl
 	return &pb.SeekReply{}, nil
 }
 
-func (o *orcaServer) GetTracks(ctx context.Context, in *pb.GetTracksRequest) (*pb.GetTracksReply, error) {
-	state, err := o.getState(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	gs, err := state.GetOrCreateGuildState(ctx, in.GuildID)
-	if err != nil {
-		o.logger.Errorf("Error getting guild state: %+v", err)
-
-		return nil, ErrInternal
-	}
-
-	if gs.Queue == nil {
-		return &pb.GetTracksReply{
-			Tracks:      nil,
-			TotalTracks: 0,
-			Looping:     false,
-		}, nil
-	}
-
-	queue := gs.Queue.GetTracks()
-
-	qlen := len(queue)
-	// start has to be at least 0 and at most qlen
-	start := min(max(int(in.Start), 0), qlen)
-	// end has to be at least start and at most qlen
-	end := min(max(int(in.End), start), qlen)
-
-	tracks := queue[start:end]
-	looping := gs.Queue.GetLoop()
-
-	res := make([]*pb.TrackData, 0, len(tracks))
-
-	for _, track := range tracks {
-		res = append(res, track.ToProto())
-	}
-
-	return &pb.GetTracksReply{
-		Tracks:      res,
-		TotalTracks: int64(qlen),
-		Looping:     looping,
-	}, nil
-}
-
-func (o *orcaServer) Pause(ctx context.Context, in *pb.GuildOnlyRequest) (*emptypb.Empty, error) {
-	state, err := o.getState(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	gs, err := state.GetOrCreateGuildState(ctx, in.GuildID)
-	if err != nil {
-		o.logger.Errorf("Error getting guild state: %+v", err)
-
-		return nil, ErrInternal
-	}
-
-	err = gs.Pause(ctx)
-	if err != nil {
-		o.logger.Errorf("Error pausing: %+v", err)
-
-		return nil, ErrInternal
-	}
-
-	return &emptypb.Empty{}, nil
-}
-
-func (o *orcaServer) Resume(ctx context.Context, in *pb.GuildOnlyRequest) (*emptypb.Empty, error) {
-	state, err := o.getState(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	gs, err := state.GetOrCreateGuildState(ctx, in.GuildID)
-	if err != nil {
-		o.logger.Errorf("Error getting guild state: %+v", err)
-
-		return nil, ErrInternal
-	}
-
-	err = gs.Resume(ctx)
-	if err != nil {
-		o.logger.Errorf("Error resuming: %+v", err)
-
-		return nil, ErrInternal
-	}
-
-	return &emptypb.Empty{}, nil
-}
-
 func (o *orcaServer) Loop(ctx context.Context, in *pb.GuildOnlyRequest) (*emptypb.Empty, error) {
-	state, err := o.getState(ctx)
+	_, guild, err := o.authenticateWithGuild(ctx, in.GuildID)
 	if err != nil {
-		return nil, err
+		o.logger.Errorf("Error authenticating request: %+v", err)
+
+		return nil, status.Error(codes.Unauthenticated, "failed to authenticate bot")
 	}
 
-	gs, err := state.GetOrCreateGuildState(ctx, in.GuildID)
+	_, err = guild.UpdateQuery(o.store).
+		Set("`loop` = NOT `loop`").
+		Exec(ctx)
 	if err != nil {
-		o.logger.Errorf("Error getting guild state: %+v", err)
-
-		return nil, ErrInternal
-	}
-
-	if gs.Queue == nil {
-		return nil, status.Error(codes.InvalidArgument, "nothing playing")
-	}
-
-	err = gs.Queue.FlipLoop(ctx)
-
-	if err != nil {
-		o.logger.Errorf("Error flipping loop state: %+v", err)
+		o.logger.Errorf("Error updating loop state: %+v", err)
 
 		return nil, ErrInternal
 	}
@@ -582,23 +531,140 @@ func (o *orcaServer) Loop(ctx context.Context, in *pb.GuildOnlyRequest) (*emptyp
 }
 
 func (o *orcaServer) ShuffleQueue(ctx context.Context, in *pb.GuildOnlyRequest) (*emptypb.Empty, error) {
-	state, err := o.getState(ctx)
+	bot, guild, err := o.authenticateWithGuild(ctx, in.GuildID)
 	if err != nil {
-		return nil, err
+		o.logger.Errorf("Error authenticating request: %+v", err)
+
+		return nil, status.Error(codes.Unauthenticated, "failed to authenticate bot")
 	}
 
-	gs, err := state.GetOrCreateGuildState(ctx, in.GuildID)
+	_, err = o.store.
+		NewUpdate().
+		Model((*models.RemoteTrack)(nil)).
+		ModelTableExpr("tracks").
+		TableExpr(
+			"(?) AS curr",
+			o.store.
+				NewSelect().
+				Model((*models.RemoteTrack)(nil)).
+				Column("id", "ord_key").
+				Where("bot_id = ? AND guild_id = ?", bot.ID, guild.ID).
+				Order("ord_key").
+				Limit(1),
+		).
+		Set("tracks.ord_key = RAND() * ? + 1 + curr.ord_key", edgeOrdKeyDiff).
+		Where("bot_id = ? AND guild_id = ? AND tracks.id != curr.id", bot.ID, guild.ID).
+		Exec(ctx)
 	if err != nil {
-		o.logger.Errorf("Error getting guild state: %+v", err)
+		if errors.Is(err, sql.ErrNoRows) {
+			return &emptypb.Empty{}, nil
+		}
+
+		o.logger.Errorf("Error updating ord keys: %+v", err)
 
 		return nil, ErrInternal
 	}
 
-	if gs.Queue == nil {
-		return nil, status.Error(codes.InvalidArgument, "nothing playing")
+	return &emptypb.Empty{}, nil
+}
+
+func (o *orcaServer) GetTracks(ctx context.Context, in *pb.GetTracksRequest) (*pb.GetTracksReply, error) {
+	bot, guild, err := o.authenticateWithGuild(ctx, in.GuildID)
+	if err != nil {
+		o.logger.Errorf("Error authenticating request: %+v", err)
+
+		return nil, status.Error(codes.Unauthenticated, "failed to authenticate bot")
 	}
 
-	gs.Queue.Shuffle(ctx)
+	var tracks []*models.RemoteTrack
+
+	countQuery := o.store.
+		NewSelect().
+		Model(&tracks).
+		Where("bot_id = ? AND guild_id = ?", bot.ID, guild.ID)
+
+	qlen, err := countQuery.Count(ctx)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		o.logger.Errorf("Error getting queue length: %+v", err)
+
+		return nil, ErrInternal
+	}
+
+	err = countQuery.
+		Order("ord_key").
+		Offset(int(in.Start)).
+		Limit(int(in.End - in.Start)).
+		Scan(ctx)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		o.logger.Errorf("Error getting tracks: %+v", err)
+
+		return nil, ErrInternal
+	}
+
+	res := make([]*pb.TrackData, len(tracks))
+	for i, track := range tracks {
+		res[i] = track.ToProto()
+	}
+
+	return &pb.GetTracksReply{
+		Tracks:      res,
+		TotalTracks: int64(qlen),
+		Looping:     guild.Loop,
+	}, nil
+}
+
+func (o *orcaServer) Pause(ctx context.Context, in *pb.GuildOnlyRequest) (*emptypb.Empty, error) {
+	bot, guild, err := o.authenticateWithGuild(ctx, in.GuildID)
+	if err != nil {
+		o.logger.Errorf("Error authenticating request: %+v", err)
+
+		return nil, status.Error(codes.Unauthenticated, "failed to authenticate bot")
+	}
+
+	_, err = guild.
+		UpdateQuery(o.store).
+		Set("paused = true").
+		Exec(ctx)
+	if err != nil {
+		o.logger.Errorf("Error updating pause state: %+v", err)
+
+		return nil, ErrInternal
+	}
+
+	err = o.sendResync(ctx, bot.ID, guild.ID, ResyncTargetGuild)
+	if err != nil {
+		o.logger.Errorf("Error sending resync: %+v", err)
+
+		return nil, ErrInternal
+	}
+
+	return &emptypb.Empty{}, nil
+}
+
+func (o *orcaServer) Resume(ctx context.Context, in *pb.GuildOnlyRequest) (*emptypb.Empty, error) {
+	bot, guild, err := o.authenticateWithGuild(ctx, in.GuildID)
+	if err != nil {
+		o.logger.Errorf("Error authenticating request: %+v", err)
+
+		return nil, status.Error(codes.Unauthenticated, "failed to authenticate bot")
+	}
+
+	_, err = guild.
+		UpdateQuery(o.store).
+		Set("paused = false").
+		Exec(ctx)
+	if err != nil {
+		o.logger.Errorf("Error updating pause state: %+v", err)
+
+		return nil, ErrInternal
+	}
+
+	err = o.sendResync(ctx, bot.ID, guild.ID, ResyncTargetGuild)
+	if err != nil {
+		o.logger.Errorf("Error sending resync: %+v", err)
+
+		return nil, ErrInternal
+	}
 
 	return &emptypb.Empty{}, nil
 }
@@ -692,25 +758,20 @@ func run(ctx context.Context, logger *zap.SugaredLogger) error { //nolint:funlen
 		return errorx.Decorate(err, "listen")
 	}
 
-	localAddr, err := getLocalAddress("127.0.0.0", port)
-	if err != nil {
-		return errorx.Decorate(err, "get local address")
-	}
-
-	orca := newOrcaServer(logger, st, localAddr)
+	orca := newOrcaServer(logger, st)
 
 	err = orca.initFromStore(ctx)
 	if err != nil {
 		return errorx.Decorate(err, "init from store")
 	}
 
-	ps := orca.store.Subscribe(ctx, DeathrattlesChannel)
-	go orca.handleDeathrattle(ctx, ps.Channel())
+	psdr := orca.store.Subscribe(ctx, DeathrattlesChannel)
+	go orca.handleDeathrattle(ctx, psdr.Channel())
 
-	grpcServer := grpc.NewServer(
-		grpc.UnaryInterceptor(orca.authLogInterceptor),
-		grpc.ForceServerCodec(utils.BytesOrProtoMarshaller{}),
-	)
+	psrs := orca.store.Subscribe(ctx, ResyncsChannel)
+	go orca.handleResync(ctx, psrs.Channel())
+
+	grpcServer := grpc.NewServer()
 	pb.RegisterOrcaServer(grpcServer, orca)
 
 	serverErrors := make(chan error, 1)
@@ -738,28 +799,6 @@ func run(ctx context.Context, logger *zap.SugaredLogger) error { //nolint:funlen
 	}
 }
 
-func (o *orcaServer) forwardRequest(ctx context.Context, call, recip string, req, res any) error {
-	o.logger.Debugf("Forwarding request %s to %s", call, recip)
-
-	conn, err := grpc.Dial(
-		recip,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithDefaultCallOptions(grpc.ForceCodec(utils.BytesOrProtoMarshaller{})),
-	)
-	if err != nil {
-		return errorx.Decorate(err, "connect to recipient")
-	}
-
-	md, ok := metadata.FromIncomingContext(ctx)
-	if ok {
-		ctx = metadata.NewOutgoingContext(ctx, md)
-	}
-
-	err = conn.Invoke(ctx, call, req, res)
-
-	return err //nolint:wrapcheck
-}
-
 func (o *orcaServer) handleDeathrattle(ctx context.Context, ch <-chan *redis.Message) {
 	logger := o.logger.Named("sub_deathrattles")
 
@@ -773,7 +812,7 @@ func (o *orcaServer) handleDeathrattle(ctx context.Context, ch <-chan *redis.Mes
 		go func() {
 			defer wg.Done()
 
-			logger.Infof("Received deathrattle: %s", msg.Payload)
+			logger.Debugf("Received deathrattle: %s", msg.Payload)
 
 			dm := new(DeathrattleMessage)
 
@@ -796,45 +835,192 @@ func (o *orcaServer) handleDeathrattle(ctx context.Context, ch <-chan *redis.Mes
 	wg.Wait()
 }
 
-func (o *orcaServer) getState(ctx context.Context) (*models.BotState, error) {
-	stateI := ctx.Value(KeyState)
-
-	state, ok := stateI.(*models.BotState)
-	if !ok {
-		o.logger.Errorf("state is type %s, not *models.BotState", reflect.TypeOf(stateI))
-
-		return nil, ErrInternal
-	}
-
-	return state, nil
-}
-
-func (o *orcaServer) getString(ctx context.Context, k key) (string, error) {
-	vi := ctx.Value(k)
-
-	v, ok := vi.(string)
-	if !ok {
-		o.logger.Errorf("value is type %s, not string", reflect.TypeOf(vi))
-
-		return "", ErrInternal
-	}
-
-	return v, nil
-}
-
-// getLocalAddress gets the local address from specific network with port.
-func getLocalAddress(network string, port int) (string, error) {
-	addrs, err := net.InterfaceAddrs()
+func (o *orcaServer) sendDeathrattle(ctx context.Context) {
+	b, err := json.Marshal(DeathrattleMessage{
+		Deceased: o.id,
+	})
 	if err != nil {
-		return "", errorx.Decorate(err, "get interface addresses")
+		o.logger.Errorf("Error marshalling deathrattle: %+v", err)
+
+		return
 	}
 
-	for _, addr := range addrs {
-		ipNet, ok := addr.(*net.IPNet)
-		if ok && ipNet.IP.Mask(ipNet.Mask).String() == network {
-			return fmt.Sprintf("%s:%d", ipNet.IP.String(), port), nil
+	err = o.store.Publish(ctx, DeathrattlesChannel, b).Err()
+	if err != nil {
+		o.logger.Errorf("Error publishing deathrattle: %+v", err)
+	}
+}
+
+func (o *orcaServer) doResync(ctx context.Context, managed *models.Bot, r *ResyncMessage) {
+	var wg sync.WaitGroup
+
+	for _, target := range r.Targets {
+		target := target
+
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			switch target {
+			case ResyncTargetGuild:
+				err := managed.ResyncGuild(ctx, r.Guild)
+				if err != nil {
+					o.logger.Errorf("Error resyncing guild: %+v", err)
+				}
+			case ResyncTargetCurrent:
+				managed.ResyncGuildTrack(ctx, r.Guild, r.SeekPos)
+			}
+		}()
+	}
+
+	wg.Wait()
+}
+
+func (o *orcaServer) handleResync(ctx context.Context, ch <-chan *redis.Message) {
+	logger := o.logger.Named("sub_resync")
+
+	var wg sync.WaitGroup
+
+	for msg := range ch {
+		msg := msg
+
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			logger.Debugf("Received resync: %s", msg.Payload)
+
+			r := new(ResyncMessage)
+
+			err := json.Unmarshal([]byte(msg.Payload), r)
+			if err != nil {
+				logger.Errorf("Error unmarshalling resync: %+v", err)
+
+				return
+			}
+
+			managed := o.getStateByID(r.Bot)
+			if managed == nil {
+				logger.Debugf("Resync message for non-managed recipient %s, skipping", r.Bot)
+
+				return
+			}
+
+			o.doResync(ctx, managed, r)
+		}()
+	}
+
+	wg.Wait()
+}
+
+func (o *orcaServer) sendResync(ctx context.Context, botID, guildID string, targets ...ResyncTarget) error {
+	return o.sendResyncSeek(ctx, botID, guildID, utils.MinDuration, targets...)
+}
+
+func (o *orcaServer) sendResyncSeek(
+	ctx context.Context,
+	botID, guildID string,
+	seekPos time.Duration,
+	targets ...ResyncTarget,
+) error {
+	b, err := json.Marshal(ResyncMessage{
+		Bot:     botID,
+		Guild:   guildID,
+		Targets: targets,
+		SeekPos: seekPos,
+	})
+	if err != nil {
+		return errorx.Decorate(err, "marshal resync message")
+	}
+
+	err = o.store.Publish(ctx, ResyncsChannel, b).Err()
+	if err != nil {
+		return errorx.Decorate(err, "publish resync message")
+	}
+
+	return nil
+}
+
+func (o *orcaServer) chooseOrdKeyRange(ctx context.Context, qlen, position int) (float64, float64) {
+	// special case - if no tracks in queue - insert all tracks with ordkeys from 0 to 100
+	if qlen == 0 {
+		return defaultPrevOrdKey, defaultNextOrdKey
+	}
+
+	// if position is negative, interpret that as index from end (wrap around)
+	// e.g. -1 means put track as last, -2 means put track as before last, etc.
+	if position < 0 {
+		position = qlen + position + 1
+	}
+
+	// position has to be at least 0 and at most len(queue)
+	position = max(0, min(qlen, position))
+
+	rows, err := o.store.
+		NewSelect().
+		Model((*models.RemoteTrack)(nil)).
+		Column("ord_key").
+		Order("ord_key").
+		Offset(max(position-1, 0)). // have a separate check for position 0 later
+		Limit(2).                   //nolint:gomnd // previous and next track in theory
+		Rows(ctx)
+	if err == nil {
+		err = rows.Err()
+	}
+
+	if err != nil {
+		o.logger.Errorf("Error getting ordkeys from store: %+v", err)
+
+		return defaultPrevOrdKey, defaultNextOrdKey
+	}
+
+	defer func() {
+		err = rows.Close()
+		if err != nil {
+			o.logger.Errorf("Error closing rows: %+v", err)
+		}
+	}()
+
+	return o.chooseOrdKeyRangeFromRows(position, rows)
+}
+
+func (o *orcaServer) chooseOrdKeyRangeFromRows(position int, rows *sql.Rows) (float64, float64) {
+	var prevOrdKey, nextOrdKey float64
+
+	rows.Next()
+
+	// special case - there is no track preceding the position, prevOrdKey should be nextOrdKey - 100
+	if position == 0 {
+		err := rows.Scan(&nextOrdKey)
+		if err != nil {
+			o.logger.Errorf("Error scanning track 0 from store: %+v", err)
+
+			return defaultPrevOrdKey, defaultNextOrdKey
+		}
+
+		return nextOrdKey - edgeOrdKeyDiff, nextOrdKey
+	}
+
+	err := rows.Scan(&prevOrdKey)
+	if err != nil {
+		o.logger.Errorf("Error scanning prev track from store: %+v", err)
+
+		return defaultPrevOrdKey, defaultNextOrdKey
+	}
+
+	// special case - there is no track succeeding the position, nextOrdKey should be prevOrdKey + 100
+	if !rows.Next() {
+		nextOrdKey = prevOrdKey + edgeOrdKeyDiff
+	} else {
+		err = rows.Scan(&nextOrdKey)
+		if err != nil {
+			o.logger.Errorf("Error scanning next track from store: %+v", err)
+
+			return defaultPrevOrdKey, defaultNextOrdKey
 		}
 	}
 
-	return "", ErrNoAddress
+	return prevOrdKey, nextOrdKey
 }
