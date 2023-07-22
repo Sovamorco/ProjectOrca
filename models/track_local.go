@@ -8,6 +8,8 @@ import (
 	"io"
 	"os/exec"
 	"strings"
+	"sync"
+	"time"
 
 	"ProjectOrca/store"
 	"ProjectOrca/utils"
@@ -17,12 +19,20 @@ import (
 )
 
 type LocalTrack struct {
+	// constant values
 	logger *zap.SugaredLogger
 	store  *store.Store
 
-	remote *RemoteTrack
-	cmd    *exec.Cmd
-	stream io.ReadCloser
+	// potentially changeable lockable values
+	remote   *RemoteTrack
+	remoteMu sync.RWMutex `exhaustruct:"optional"`
+	cmd      *exec.Cmd
+	cmdMu    sync.RWMutex `exhaustruct:"optional"`
+	stream   io.ReadCloser
+	streamMu sync.RWMutex `exhaustruct:"optional"`
+	// pos is duplicated here to leave remote concurrency-safe
+	pos   time.Duration
+	posMu sync.RWMutex `exhaustruct:"optional"`
 }
 
 func NewLocalTrack(logger *zap.SugaredLogger, store *store.Store) *LocalTrack {
@@ -32,11 +42,12 @@ func NewLocalTrack(logger *zap.SugaredLogger, store *store.Store) *LocalTrack {
 		remote: nil,
 		cmd:    nil,
 		stream: nil,
+		pos:    0,
 	}
 }
 
 func (t *LocalTrack) initialized() bool {
-	return t.remote != nil && t.cmd != nil && t.stream != nil
+	return t.getRemote() != nil && t.getCMD() != nil && t.getStream() != nil
 }
 
 func (t *LocalTrack) initialize(ctx context.Context) error {
@@ -44,16 +55,18 @@ func (t *LocalTrack) initialize(ctx context.Context) error {
 		return nil
 	}
 
-	err := t.setStreamURL(ctx)
+	remote := t.getRemote()
+
+	err := t.setStreamURL(ctx, remote)
 	if err != nil {
-		if t.remote.URL == "" {
+		if remote.URL == "" {
 			return errorx.Decorate(err, "get stream url")
 		}
 
 		t.logger.Errorf("Error getting new stream URL, hoping old one works: %+v", err)
 	}
 
-	err = t.startStream()
+	err = t.startStream(remote)
 	if err != nil {
 		return errorx.Decorate(err, "get stream")
 	}
@@ -61,15 +74,15 @@ func (t *LocalTrack) initialize(ctx context.Context) error {
 	return nil
 }
 
-func (t *LocalTrack) setStreamURL(ctx context.Context) error {
-	urlB, err := utils.GetYTDLPOutput(t.logger, "--get-url", t.remote.OriginalURL)
+func (t *LocalTrack) setStreamURL(ctx context.Context, remote *RemoteTrack) error {
+	urlB, err := utils.GetYTDLPOutput(t.logger, "--get-url", remote.OriginalURL)
 	if err != nil {
 		return errorx.Decorate(err, "get stream url")
 	}
 
-	t.remote.URL = strings.TrimSpace(string(urlB))
+	remote.URL = strings.TrimSpace(string(urlB))
 
-	_, err = t.store.NewUpdate().Model(t.remote).Column("url").WherePK().Exec(ctx)
+	_, err = t.store.NewUpdate().Model(remote).Column("url").WherePK().Exec(ctx)
 	if err != nil {
 		return errorx.Decorate(err, "store url")
 	}
@@ -77,23 +90,23 @@ func (t *LocalTrack) setStreamURL(ctx context.Context) error {
 	return nil
 }
 
-func (t *LocalTrack) startStream() error {
+func (t *LocalTrack) startStream(remote *RemoteTrack) error {
 	ffmpegArgs := []string{
-		"-headers", t.remote.getFormattedHeaders(),
+		"-headers", remote.getFormattedHeaders(),
 		"-reconnect", "1",
 		"-reconnect_streamed", "1",
 		"-reconnect_delay_max", "2",
 	}
 
-	if !t.remote.Live {
+	if !remote.Live {
 		ffmpegArgs = append(ffmpegArgs,
 			"-reconnect_at_eof", "1",
-			"-ss", fmt.Sprintf("%f", t.remote.Pos.Seconds()),
+			"-ss", fmt.Sprintf("%f", t.getPos().Seconds()),
 		)
 	}
 
 	ffmpegArgs = append(ffmpegArgs,
-		"-i", t.remote.URL,
+		"-i", remote.URL,
 		"-map", "0:a",
 		// "-filter:a", "dynaudnorm=p=0.9:r=0.5", // makes metal sound dogshit :( TODO: revisit
 		"-acodec", "libopus",
@@ -128,34 +141,34 @@ func (t *LocalTrack) startStream() error {
 		return errorx.Decorate(err, "start ffmpeg process")
 	}
 
-	t.cmd = ffmpeg
-	t.stream = buf
+	t.setCMD(ffmpeg)
+	t.setStream(buf)
 
 	return nil
 }
 
 func (t *LocalTrack) cleanup() {
-	if t.cmd != nil {
-		err := t.cmd.Process.Kill()
+	if cmd := t.getCMD(); cmd != nil {
+		err := cmd.Process.Kill()
 		if err != nil {
 			t.logger.Errorf("Error killing current process: %+v", err)
 		}
-
-		t.cmd = nil
 	}
 
-	if t.stream != nil {
-		err := t.stream.Close()
+	if stream := t.getStream(); stream != nil {
+		err := stream.Close()
 		if err != nil {
 			t.logger.Errorf("Error closing current stream: %+v", err)
 		}
-
-		t.stream = nil
 	}
+
+	t.setCMD(nil)
+	t.setStream(nil)
+	t.setPos(0)
 }
 
 func (t *LocalTrack) getPacket(packet []byte) error {
-	n, err := io.ReadFull(t.stream, packet)
+	n, err := io.ReadFull(t.getStream(), packet)
 	if err != nil {
 		if !errors.Is(err, io.ErrUnexpectedEOF) {
 			return errorx.Decorate(err, "read audio Stream")

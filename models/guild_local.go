@@ -27,26 +27,31 @@ const (
 	bufferMilliseconds = 500
 	bufferPackets      = bufferMilliseconds / frameSizeMs
 
-	storeInterval = 5 * time.Second
+	storeInterval = 1 * time.Second
 
 	playLoopSleep = 50 * time.Millisecond
 )
 
 type Guild struct {
-	id            string
-	botID         string
-	botSession    *discordgo.Session
-	logger        *zap.SugaredLogger
-	store         *store.Store
-	vc            *discordgo.VoiceConnection
-	vcMu          sync.RWMutex `exhaustruct:"optional"`
-	paused        bool
-	channelID     string
+	// constant values
+	id         string
+	botID      string
+	botSession *discordgo.Session
+	logger     *zap.SugaredLogger
+	store      *store.Store
+
+	// signal channels
 	storeLoopDone chan struct{}
 	playLoopDone  chan struct{}
+	resync        chan struct{}
 	resyncPlaying chan struct{}
+	playing       chan struct{}
 
-	track *LocalTrack
+	// potentially changeable lockable values
+	vc      *discordgo.VoiceConnection
+	vcMu    sync.RWMutex `exhaustruct:"optional"`
+	track   *LocalTrack
+	trackMu sync.RWMutex `exhaustruct:"optional"`
 }
 
 func NewGuild(
@@ -58,18 +63,19 @@ func NewGuild(
 ) *Guild {
 	logger = logger.Named("guild").With("guild_id", id)
 	g := &Guild{
-		id:            id,
-		botID:         botID,
-		botSession:    botSession,
-		logger:        logger,
-		store:         store,
-		vc:            nil,
-		paused:        false,
-		channelID:     "",
+		id:         id,
+		botID:      botID,
+		botSession: botSession,
+		logger:     logger,
+		store:      store,
+
 		storeLoopDone: make(chan struct{}, 1),
 		playLoopDone:  make(chan struct{}, 1),
+		resync:        make(chan struct{}, 1),
 		resyncPlaying: make(chan struct{}, 1),
+		playing:       make(chan struct{}, 1),
 
+		vc:    nil,
 		track: NewLocalTrack(logger, store),
 	}
 
@@ -84,6 +90,20 @@ func (g *Guild) getVC() *discordgo.VoiceConnection {
 	defer g.vcMu.RUnlock()
 
 	return g.vc
+}
+
+func (g *Guild) getTrack() *LocalTrack {
+	g.trackMu.RLock()
+	defer g.trackMu.RUnlock()
+
+	return g.track
+}
+
+func (g *Guild) setTrack(v *LocalTrack) {
+	g.trackMu.Lock()
+	defer g.trackMu.Unlock()
+
+	g.track = v
 }
 
 func (g *Guild) gracefulShutdown() {
@@ -116,10 +136,10 @@ func (g *Guild) subTrack(ctx context.Context, seekPos time.Duration) error {
 	}
 
 	l := NewLocalTrack(g.logger, g.store)
-	l.remote = track
+	l.setRemote(track)
 
 	if seekPos != utils.MinDuration {
-		l.remote.Pos = seekPos
+		l.setPos(seekPos)
 	}
 
 	err = l.initialize(ctx)
@@ -127,8 +147,8 @@ func (g *Guild) subTrack(ctx context.Context, seekPos time.Duration) error {
 		return errorx.Decorate(err, "initialize track")
 	}
 
-	old := g.track
-	g.track = l
+	old := g.getTrack()
+	g.setTrack(l)
 
 	old.cleanup()
 
@@ -143,8 +163,9 @@ func (g *Guild) ResyncPlaying(ctx context.Context, seekPos time.Duration) {
 			g.logger.Errorf("Error substituting track: %+v", err)
 		}
 
-		g.track.remote = nil
-		g.track.cleanup()
+		track := g.getTrack()
+		track.setRemote(nil)
+		track.cleanup()
 	}
 
 	// make sure this does not block
@@ -165,11 +186,12 @@ func (g *Guild) storeLoop(ctx context.Context) {
 		case <-ticker.C:
 		}
 
-		if g.track.remote != nil {
+		track := g.getTrack()
+		if remote, pos := track.getRemote(), track.getPos(); remote != nil {
 			_, err := g.store.
 				NewUpdate().
-				Model(g.track.remote).
-				Column("pos").
+				Model(remote).
+				Set("pos = ?", pos).
 				WherePK().
 				Exec(ctx)
 			if err != nil {
@@ -200,7 +222,7 @@ func (g *Guild) getNextTrack(ctx context.Context) (*RemoteTrack, error) {
 	return &track, nil
 }
 
-func (g *Guild) playLoop(ctx context.Context) { //nolint:funlen,gocognit,cyclop // fixme
+func (g *Guild) playLoop(ctx context.Context) { //nolint:cyclop // fixme
 	packet := make([]byte, packetSize)
 
 	for {
@@ -210,54 +232,18 @@ func (g *Guild) playLoop(ctx context.Context) { //nolint:funlen,gocognit,cyclop 
 		default:
 		}
 
-		if g.track.remote == nil {
-			err := g.checkForNextTrack(ctx)
-
-			if errors.Is(err, ErrShuttingDown) {
-				return
-			}
-
-			if errors.Is(err, ErrNoTrack) {
-				continue
-			}
+		fulfilled, err := g.playLoopPreconditions(ctx)
+		if err != nil {
+			return // it should only ever return ErrShuttingDown, so just return
 		}
 
-		if g.getVC() == nil {
-			if g.channelID == "" {
-				time.Sleep(playLoopSleep)
-
-				continue
-			}
-
-			err := g.connect(g.channelID)
-			if err != nil {
-				g.logger.Errorf("Error connecting to voice channel: %+v", err)
-				time.Sleep(playLoopSleep)
-
-				continue
-			}
-		}
-
-		if g.paused {
+		if !fulfilled {
 			time.Sleep(playLoopSleep)
 
 			continue
 		}
 
-		if !g.track.initialized() {
-			err := g.track.initialize(ctx)
-			if err != nil {
-				g.logger.Errorf("Error initializing track: %+v", err)
-
-				g.track.remote = nil
-
-				time.Sleep(playLoopSleep)
-
-				continue
-			}
-		}
-
-		err := g.track.getPacket(packet)
+		err = g.getTrack().getPacket(packet)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				err = g.stop(ctx)
@@ -269,7 +255,7 @@ func (g *Guild) playLoop(ctx context.Context) { //nolint:funlen,gocognit,cyclop 
 			}
 
 			g.logger.Errorf("Error getting packet from stream: %+v", err)
-			g.track.cleanup()
+			g.getTrack().cleanup()
 
 			continue
 		}
@@ -286,25 +272,74 @@ func (g *Guild) playLoop(ctx context.Context) { //nolint:funlen,gocognit,cyclop 
 
 		g.vcMu.RUnlock()
 
-		if g.track.remote != nil && !g.track.remote.Live {
-			g.track.remote.Pos += frameSizeMs * time.Millisecond
+		track := g.getTrack()
+		if remote := track.getRemote(); remote != nil && !remote.Live {
+			track.setPos(track.getPos() + frameSizeMs*time.Millisecond)
 		}
 	}
+}
+
+// playLoopPreconditions checks for all the preconditions for playing the track.
+func (g *Guild) playLoopPreconditions(ctx context.Context) (bool, error) { //nolint:cyclop // fixme
+	if g.getTrack().getRemote() == nil {
+		err := g.checkForNextTrack(ctx)
+
+		if errors.Is(err, ErrShuttingDown) { //nolint:gocritic // I swear if else here is better
+			return false, ErrShuttingDown
+		} else if errors.Is(err, ErrNoTrack) {
+			return false, nil
+		} else if err != nil {
+			g.logger.Errorf("Error checking for next track: %+v", err)
+
+			return false, nil
+		}
+	}
+
+	if g.getVC() == nil {
+		err := g.checkForVC(ctx)
+
+		if errors.Is(err, ErrShuttingDown) { //nolint:gocritic // I swear if else here is better
+			return false, ErrShuttingDown
+		} else if errors.Is(err, ErrNoVC) {
+			return false, nil
+		} else if err != nil {
+			g.logger.Errorf("Error checking for voice connection: %+v", err)
+
+			return false, nil
+		}
+	}
+
+	if track := g.getTrack(); !track.initialized() {
+		err := track.initialize(ctx)
+		if err != nil {
+			g.logger.Errorf("Error initializing track: %+v", err)
+
+			track.setRemote(nil)
+
+			return false, nil
+		}
+	}
+
+	// try to consume playing from itself to verify that the track is, indeed, playing
+	select {
+	case <-g.playLoopDone:
+		return false, ErrShuttingDown
+	case g.playing <- <-g.playing:
+	}
+
+	return true, nil
 }
 
 func (g *Guild) checkForNextTrack(ctx context.Context) error {
 	track, err := g.getNextTrack(ctx)
 	if err == nil {
-		g.track.remote = track
+		g.getTrack().setRemote(track)
 
 		return nil
 	}
 
 	if !errors.Is(err, ErrEmptyQueue) {
-		g.logger.Errorf("Error getting track from store: %+v", err)
-		time.Sleep(playLoopSleep)
-
-		return ErrNoTrack
+		return errorx.Decorate(err, "get track from store")
 	}
 
 	err = g.connect("")
@@ -323,11 +358,54 @@ func (g *Guild) checkForNextTrack(ctx context.Context) error {
 	return ErrNoTrack
 }
 
-func (g *Guild) stop(ctx context.Context) error {
-	oldcurr := g.track.remote
+func (g *Guild) checkForVC(ctx context.Context) error {
+	remote, err := g.getRemote(ctx)
+	if err != nil {
+		return errorx.Decorate(err, "get remote guild")
+	}
 
-	g.track.remote = nil
-	g.track.cleanup()
+	if remote.ChannelID != "" {
+		err = g.connect(remote.ChannelID)
+		if err != nil {
+			return errorx.Decorate(err, "connect to voice channel")
+		}
+
+		return nil
+	}
+
+	// wait for resync
+	select {
+	case <-g.playLoopDone:
+		return ErrShuttingDown
+	case <-g.resync:
+	}
+
+	return ErrNoVC
+}
+
+func (g *Guild) getRemote(ctx context.Context) (*RemoteGuild, error) {
+	var r RemoteGuild
+
+	r.BotID, r.ID = g.botID, g.id
+
+	err := g.store.
+		NewSelect().
+		Model(&r).
+		WherePK().
+		Scan(ctx)
+	if err != nil {
+		return nil, errorx.Decorate(err, "get remote guild")
+	}
+
+	return &r, nil
+}
+
+func (g *Guild) stop(ctx context.Context) error {
+	track := g.getTrack()
+	oldcurr := track.getRemote()
+
+	track.setRemote(nil)
+	track.cleanup()
 
 	err := oldcurr.DeleteOrRequeue(ctx, g.store)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -338,7 +416,7 @@ func (g *Guild) stop(ctx context.Context) error {
 }
 
 func (g *Guild) connect(channelID string) error {
-	if channelID == "" || g.track.remote == nil {
+	if channelID == "" || g.getTrack().getRemote() == nil {
 		if g.getVC() != nil {
 			g.vcMu.Lock()
 

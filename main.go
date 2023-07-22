@@ -368,7 +368,7 @@ func (o *orcaServer) Play(ctx context.Context, in *pb.PlayRequest) (*pb.PlayRepl
 		return nil, ErrInternal
 	}
 
-	prevOrdKey, nextOrdKey := o.chooseOrdKeyRange(ctx, qlen, int(in.Position))
+	prevOrdKey, nextOrdKey, affectedFirst := o.chooseOrdKeyRange(ctx, qlen, int(in.Position))
 
 	models.SetOrdKeys(tracks, prevOrdKey, nextOrdKey)
 
@@ -387,9 +387,9 @@ func (o *orcaServer) Play(ctx context.Context, in *pb.PlayRequest) (*pb.PlayRepl
 		res[i] = track.ToProto()
 	}
 
-	// that concerns current track
-	if qlen == 0 || in.Position == 0 {
-		err = o.sendResync(ctx, bot.ID, guild.ID, ResyncTargetCurrent)
+	// that concerns current track and guild voice state
+	if affectedFirst {
+		err = o.sendResync(ctx, bot.ID, guild.ID, ResyncTargetCurrent, ResyncTargetGuild)
 
 		if err != nil {
 			o.logger.Errorf("Error sending resync message: %+v", err)
@@ -943,10 +943,10 @@ func (o *orcaServer) sendResyncSeek(
 	return nil
 }
 
-func (o *orcaServer) chooseOrdKeyRange(ctx context.Context, qlen, position int) (float64, float64) {
+func (o *orcaServer) chooseOrdKeyRange(ctx context.Context, qlen, position int) (float64, float64, bool) {
 	// special case - if no tracks in queue - insert all tracks with ordkeys from 0 to 100
 	if qlen == 0 {
-		return defaultPrevOrdKey, defaultNextOrdKey
+		return defaultPrevOrdKey, defaultNextOrdKey, true
 	}
 
 	// if position is negative, interpret that as index from end (wrap around)
@@ -973,7 +973,7 @@ func (o *orcaServer) chooseOrdKeyRange(ctx context.Context, qlen, position int) 
 	if err != nil {
 		o.logger.Errorf("Error getting ordkeys from store: %+v", err)
 
-		return defaultPrevOrdKey, defaultNextOrdKey
+		return defaultPrevOrdKey, defaultNextOrdKey, true
 	}
 
 	defer func() {
@@ -986,7 +986,7 @@ func (o *orcaServer) chooseOrdKeyRange(ctx context.Context, qlen, position int) 
 	return o.chooseOrdKeyRangeFromRows(position, rows)
 }
 
-func (o *orcaServer) chooseOrdKeyRangeFromRows(position int, rows *sql.Rows) (float64, float64) {
+func (o *orcaServer) chooseOrdKeyRangeFromRows(position int, rows *sql.Rows) (float64, float64, bool) {
 	var prevOrdKey, nextOrdKey float64
 
 	rows.Next()
@@ -997,17 +997,17 @@ func (o *orcaServer) chooseOrdKeyRangeFromRows(position int, rows *sql.Rows) (fl
 		if err != nil {
 			o.logger.Errorf("Error scanning track 0 from store: %+v", err)
 
-			return defaultPrevOrdKey, defaultNextOrdKey
+			return defaultPrevOrdKey, defaultNextOrdKey, true
 		}
 
-		return nextOrdKey - edgeOrdKeyDiff, nextOrdKey
+		return nextOrdKey - edgeOrdKeyDiff, nextOrdKey, true
 	}
 
 	err := rows.Scan(&prevOrdKey)
 	if err != nil {
 		o.logger.Errorf("Error scanning prev track from store: %+v", err)
 
-		return defaultPrevOrdKey, defaultNextOrdKey
+		return defaultPrevOrdKey, defaultNextOrdKey, true
 	}
 
 	// special case - there is no track succeeding the position, nextOrdKey should be prevOrdKey + 100
@@ -1018,9 +1018,9 @@ func (o *orcaServer) chooseOrdKeyRangeFromRows(position int, rows *sql.Rows) (fl
 		if err != nil {
 			o.logger.Errorf("Error scanning next track from store: %+v", err)
 
-			return defaultPrevOrdKey, defaultNextOrdKey
+			return defaultPrevOrdKey, defaultNextOrdKey, true
 		}
 	}
 
-	return prevOrdKey, nextOrdKey
+	return prevOrdKey, nextOrdKey, false
 }

@@ -14,10 +14,14 @@ import (
 )
 
 type Bot struct {
+	// constant values
 	logger  *zap.SugaredLogger
 	store   *store.Store
 	session *discordgo.Session
-	guilds  map[string]*Guild
+
+	// potentially changeable lockable values
+	guilds   map[string]*Guild
+	guildsMu sync.Mutex `exhaustruct:"optional"`
 }
 
 func NewBot(logger *zap.SugaredLogger, store *store.Store, token string) (*Bot, error) {
@@ -58,6 +62,7 @@ func startSession(token string) (*discordgo.Session, error) {
 func (b *Bot) GracefulShutdown() {
 	var wg sync.WaitGroup
 
+	b.guildsMu.Lock()
 	for _, guild := range b.guilds {
 		guild := guild
 
@@ -69,6 +74,7 @@ func (b *Bot) GracefulShutdown() {
 			guild.gracefulShutdown()
 		}()
 	}
+	b.guildsMu.Unlock()
 
 	wg.Wait()
 
@@ -103,8 +109,25 @@ func (b *Bot) resyncGuild(ctx context.Context, guild *RemoteGuild) error {
 		return errorx.Decorate(err, "error connecting to voice channel")
 	}
 
-	local.channelID = guild.ChannelID
-	local.paused = guild.Paused
+	// make sure this does not block
+	select {
+	case local.resync <- struct{}{}:
+	default:
+	}
+
+	if guild.Paused {
+		// try to consume from playing
+		select {
+		case <-local.playing:
+		default:
+		}
+	} else {
+		// try to fill playing
+		select {
+		case local.playing <- struct{}{}:
+		default:
+		}
+	}
 
 	return nil
 }
@@ -162,6 +185,9 @@ func (b *Bot) ResyncGuildTrack(ctx context.Context, guildID string, seekPos time
 }
 
 func (b *Bot) getGuild(ctx context.Context, guildID string) *Guild {
+	b.guildsMu.Lock()
+	defer b.guildsMu.Unlock()
+
 	local, ok := b.guilds[guildID]
 	if !ok {
 		local = NewGuild(ctx, guildID, b.GetID(), b.session, b.logger, b.store)
