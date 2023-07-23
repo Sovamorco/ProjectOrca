@@ -114,7 +114,7 @@ func (t *LocalTrack) startStream(remote *RemoteTrack) error {
 	ffmpegArgs = append(ffmpegArgs,
 		"-i", remote.StreamURL,
 		"-map", "0:a",
-		// "-filter:a", "dynaudnorm=p=0.9:r=0.5", // makes metal sound dogshit :( TODO: revisit
+		"-filter:a", "dynaudnorm=p=0.9:r=0.9",
 		"-acodec", "libopus",
 		"-f", "data",
 		"-ar", fmt.Sprint(sampleRate),

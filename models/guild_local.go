@@ -23,15 +23,17 @@ const (
 	sampleRate  = 48000
 	channels    = 2
 	frameSizeMs = 20
-	bitrate     = 64000 // bits/s
+	bitrate     = 192000 // bits/s
 	packetSize  = bitrate * frameSizeMs / 1000 / 8
 
-	bufferMilliseconds = 500
+	bufferMilliseconds = 1000 // also dynaudnorm (possibly) has its own buffer
 	bufferPackets      = bufferMilliseconds / frameSizeMs
 
 	storeInterval = 1 * time.Second
 
 	playLoopSleep = 50 * time.Millisecond
+
+	opusSendTimeout = 1 * time.Second
 )
 
 type Guild struct {
@@ -227,6 +229,7 @@ func (g *Guild) playLoop(ctx context.Context) { //nolint:cyclop // FIXME
 
 			return
 		case g.vc.OpusSend <- packet:
+		case <-time.After(opusSendTimeout):
 		}
 
 		g.vcMu.RUnlock()
