@@ -14,6 +14,7 @@ linters:
   - tagliatelle
   - varnamelen
   - depguard
+  - godox
   - goimports # conflicts with gofumpt
   - gci       # conflicts with gofumpt
   - gofumpt   # broken, just run task fmt

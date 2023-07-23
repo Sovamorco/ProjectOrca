@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"ProjectOrca/extractor"
+
 	"ProjectOrca/utils"
 
 	"ProjectOrca/store"
@@ -39,6 +41,7 @@ type Guild struct {
 	botSession *discordgo.Session
 	logger     *zap.SugaredLogger
 	store      *store.Store
+	extractors *extractor.Extractors
 
 	// signal channels
 	storeLoopDone chan struct{}
@@ -60,6 +63,7 @@ func NewGuild(
 	botSession *discordgo.Session,
 	logger *zap.SugaredLogger,
 	store *store.Store,
+	extractors *extractor.Extractors,
 ) *Guild {
 	logger = logger.Named("guild").With("guild_id", id)
 	g := &Guild{
@@ -68,6 +72,7 @@ func NewGuild(
 		botSession: botSession,
 		logger:     logger,
 		store:      store,
+		extractors: extractors,
 
 		storeLoopDone: make(chan struct{}, 1),
 		playLoopDone:  make(chan struct{}, 1),
@@ -76,7 +81,7 @@ func NewGuild(
 		playing:       make(chan struct{}, 1),
 
 		vc:    nil,
-		track: NewLocalTrack(logger, store),
+		track: NewLocalTrack(logger, store, extractors),
 	}
 
 	go g.storeLoop(context.WithoutCancel(ctx))
@@ -135,7 +140,7 @@ func (g *Guild) subTrack(ctx context.Context, seekPos time.Duration) error {
 		return errorx.Decorate(err, "get next track")
 	}
 
-	l := NewLocalTrack(g.logger, g.store)
+	l := NewLocalTrack(g.logger, g.store, g.extractors)
 	l.setRemote(track)
 
 	if seekPos != utils.MinDuration {
@@ -222,7 +227,7 @@ func (g *Guild) getNextTrack(ctx context.Context) (*RemoteTrack, error) {
 	return &track, nil
 }
 
-func (g *Guild) playLoop(ctx context.Context) { //nolint:cyclop // fixme
+func (g *Guild) playLoop(ctx context.Context) { //nolint:cyclop // FIXME
 	packet := make([]byte, packetSize)
 
 	for {
@@ -280,7 +285,7 @@ func (g *Guild) playLoop(ctx context.Context) { //nolint:cyclop // fixme
 }
 
 // playLoopPreconditions checks for all the preconditions for playing the track.
-func (g *Guild) playLoopPreconditions(ctx context.Context) (bool, error) { //nolint:cyclop // fixme
+func (g *Guild) playLoopPreconditions(ctx context.Context) (bool, error) { //nolint:cyclop // FIXME
 	if g.getTrack().getRemote() == nil {
 		err := g.checkForNextTrack(ctx)
 

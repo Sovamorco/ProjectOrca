@@ -2,68 +2,48 @@ package models
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"ProjectOrca/extractor"
+
 	"ProjectOrca/store"
 
 	pb "ProjectOrca/proto"
-	"ProjectOrca/utils"
-
 	"github.com/google/uuid"
 	"github.com/joomcode/errorx"
 	"github.com/uptrace/bun"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
-
-var ErrNoResults = errors.New("no search results")
 
 const (
 	RequeueOrdKeyDiff = 50
 )
 
-type YTDLData struct {
-	ID          string            `json:"id"`
-	Title       string            `json:"title"`
-	Channel     string            `json:"channel"`
-	OriginalURL string            `json:"original_url"`
-	URL         string            `json:"url"`
-	IsLive      bool              `json:"is_live"`
-	Duration    float64           `json:"duration"`
-	HTTPHeaders map[string]string `json:"http_headers"`
-}
-
-type YTDLSearchData struct {
-	YTDLData
-	Entries []YTDLData `json:"entries"`
-}
-
 type RemoteTrack struct {
 	bun.BaseModel `bun:"table:tracks" exhaustruct:"optional"`
 
-	ID          string `bun:",pk"`
-	BotID       string
-	GuildID     string
-	Pos         time.Duration
-	Duration    time.Duration
-	OrdKey      float64
-	Title       string
-	OriginalURL string
-	URL         string
-	HTTPHeaders map[string]string
-	Live        bool
+	ID            string `bun:",pk"`
+	BotID         string
+	GuildID       string
+	Pos           time.Duration
+	Duration      time.Duration
+	OrdKey        float64
+	Title         string
+	ExtractionURL string
+	DisplayURL    string
+	StreamURL     string
+	HTTPHeaders   map[string]string
+	Live          bool
 }
 
-func NewRemoteTracks(logger *zap.SugaredLogger, botID, guildID, url string) ([]*RemoteTrack, error) {
-	if !utils.URLRx.MatchString(url) {
-		url = "ytsearch:" + url
-	}
-
-	data, err := getTracksData(logger, url)
+func NewRemoteTracks(
+	ctx context.Context,
+	botID, guildID, url string,
+	extractors *extractor.Extractors,
+) ([]*RemoteTrack, error) {
+	data, err := extractors.ExtractTracksData(ctx, url)
 	if err != nil {
 		return nil, errorx.Decorate(err, "get tracks data")
 	}
@@ -71,23 +51,19 @@ func NewRemoteTracks(logger *zap.SugaredLogger, botID, guildID, url string) ([]*
 	res := make([]*RemoteTrack, len(data))
 
 	for i, datum := range data {
-		originalURL := datum.URL
-		if datum.OriginalURL != "" {
-			originalURL = datum.OriginalURL
-		}
-
 		res[i] = &RemoteTrack{
-			ID:          uuid.New().String(),
-			BotID:       botID,
-			GuildID:     guildID,
-			Pos:         0,
-			Duration:    time.Duration(datum.Duration * float64(time.Second)),
-			OrdKey:      0,
-			Title:       datum.Title,
-			OriginalURL: originalURL,
-			URL:         "",
-			HTTPHeaders: datum.HTTPHeaders,
-			Live:        datum.IsLive,
+			ID:            uuid.New().String(),
+			BotID:         botID,
+			GuildID:       guildID,
+			Pos:           0,
+			Duration:      datum.Duration,
+			OrdKey:        0,
+			Title:         datum.Title,
+			ExtractionURL: datum.ExtractionURL,
+			DisplayURL:    datum.DisplayURL,
+			StreamURL:     datum.StreamURL,
+			HTTPHeaders:   datum.HTTPHeaders,
+			Live:          datum.Live,
 		}
 	}
 
@@ -96,11 +72,11 @@ func NewRemoteTracks(logger *zap.SugaredLogger, botID, guildID, url string) ([]*
 
 func (t *RemoteTrack) ToProto() *pb.TrackData {
 	return &pb.TrackData{
-		Title:       t.Title,
-		OriginalURL: t.OriginalURL,
-		Live:        t.Live,
-		Position:    durationpb.New(t.Pos),
-		Duration:    durationpb.New(t.Duration),
+		Title:      t.Title,
+		DisplayURL: t.DisplayURL,
+		Live:       t.Live,
+		Position:   durationpb.New(t.Pos),
+		Duration:   durationpb.New(t.Duration),
 	}
 }
 
@@ -173,33 +149,6 @@ func (t *RemoteTrack) getFormattedHeaders() string {
 	}
 
 	return strings.Join(fmtd, "\r\n")
-}
-
-func getTracksData(logger *zap.SugaredLogger, url string) ([]YTDLData, error) {
-	jsonB, err := utils.GetYTDLPOutput(logger, "--flat-playlist", "-J", url)
-	if err != nil {
-		return nil, errorx.Decorate(err, "get ytdlp output")
-	}
-
-	var vd YTDLSearchData
-	err = json.Unmarshal(jsonB, &vd)
-
-	if err != nil {
-		return nil, errorx.Decorate(err, "unmarshal ytdl output")
-	}
-
-	var ad []YTDLData
-
-	if vd.Entries == nil {
-		ad = []YTDLData{vd.YTDLData}
-	} else {
-		if len(vd.Entries) < 1 {
-			return nil, ErrNoResults
-		}
-		ad = vd.Entries
-	}
-
-	return ad, nil
 }
 
 func SetOrdKeys(tracks []*RemoteTrack, prevOrdKey, nextOrdKey float64) {

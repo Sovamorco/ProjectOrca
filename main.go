@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -9,9 +10,14 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
+
+	"ProjectOrca/extractor"
+	"ProjectOrca/spotify"
+	"ProjectOrca/ytdl"
 
 	"ProjectOrca/utils"
 
@@ -66,25 +72,30 @@ const (
 	ResyncTargetGuild
 )
 
-var ErrInternal = status.Error(codes.Internal, "internal error")
+var (
+	ErrFailedToAuthenticate = status.Error(codes.Unauthenticated, "failed to authenticate bot")
+	ErrInternal             = status.Error(codes.Internal, "internal error")
+)
 
 type orcaServer struct {
 	pb.UnimplementedOrcaServer `exhaustruct:"optional"`
 
-	id     string
-	states []*models.Bot
-	logger *zap.SugaredLogger
-	store  *store.Store
+	id         string
+	states     []*models.Bot
+	logger     *zap.SugaredLogger
+	store      *store.Store
+	extractors *extractor.Extractors
 }
 
 func newOrcaServer(logger *zap.SugaredLogger, st *store.Store) *orcaServer {
 	serverLogger := logger.Named("server")
 
 	return &orcaServer{
-		id:     uuid.New().String(),
-		states: make([]*models.Bot, 0),
-		logger: serverLogger,
-		store:  st,
+		id:         uuid.New().String(),
+		states:     make([]*models.Bot, 0),
+		logger:     serverLogger,
+		store:      st,
+		extractors: extractor.NewExtractors(),
 	}
 }
 
@@ -138,7 +149,7 @@ func (o *orcaServer) initFromStore(ctx context.Context) error {
 			continue
 		}
 
-		localState, err := models.NewBot(o.logger, o.store, state.Token)
+		localState, err := models.NewBot(o.logger, o.store, o.extractors, state.Token)
 		if err != nil {
 			o.logger.Errorf("Could not create local state for remote state %s: %+v", state.ID, err)
 		}
@@ -257,7 +268,7 @@ func (o *orcaServer) authenticateWithGuild(ctx context.Context, guildID string) 
 }
 
 func (o *orcaServer) register(ctx context.Context, token string) (*models.RemoteBot, error) {
-	state, err := models.NewBot(o.logger, o.store, token)
+	state, err := models.NewBot(o.logger, o.store, o.extractors, token)
 	if err != nil {
 		return nil, errorx.Decorate(err, "create local bot state")
 	}
@@ -284,7 +295,7 @@ func (o *orcaServer) Join(ctx context.Context, in *pb.JoinRequest) (*emptypb.Emp
 	if err != nil {
 		o.logger.Errorf("Error authenticating request: %+v", err)
 
-		return nil, status.Error(codes.Unauthenticated, "failed to authenticate bot")
+		return nil, ErrFailedToAuthenticate
 	}
 
 	if guild.ChannelID == in.ChannelID {
@@ -315,7 +326,7 @@ func (o *orcaServer) Leave(ctx context.Context, in *pb.GuildOnlyRequest) (*empty
 	if err != nil {
 		o.logger.Errorf("Error authenticating request: %+v", err)
 
-		return nil, status.Error(codes.Unauthenticated, "failed to authenticate bot")
+		return nil, ErrFailedToAuthenticate
 	}
 
 	if guild.ChannelID == "" {
@@ -347,48 +358,29 @@ func (o *orcaServer) Play(ctx context.Context, in *pb.PlayRequest) (*pb.PlayRepl
 	if err != nil {
 		o.logger.Errorf("Error authenticating request: %+v", err)
 
-		return nil, status.Error(codes.Unauthenticated, "failed to authenticate bot")
+		return nil, ErrFailedToAuthenticate
 	}
 
-	tracks, err := models.NewRemoteTracks(o.logger, bot.ID, guild.ID, in.Url)
+	tracksData, affectedFirst, err := o.addTracks(ctx, bot, guild, in.Url, int(in.Position))
 	if err != nil {
-		o.logger.Errorf("Error getting remote tracks: %+v", err)
+		o.logger.Errorf("Error adding tracks: %+v", err)
 
 		return nil, ErrInternal
-	}
-
-	qlen, err := o.store.
-		NewSelect().
-		Model((*models.RemoteTrack)(nil)).
-		Where("bot_id = ? AND guild_id = ?", bot.ID, guild.ID).
-		Count(ctx)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		o.logger.Errorf("Error getting tracks from store: %+v", err)
-
-		return nil, ErrInternal
-	}
-
-	prevOrdKey, nextOrdKey, affectedFirst := o.chooseOrdKeyRange(ctx, qlen, int(in.Position))
-
-	models.SetOrdKeys(tracks, prevOrdKey, nextOrdKey)
-
-	_, err = o.store.
-		NewInsert().
-		Model(&tracks).
-		Exec(ctx)
-	if err != nil {
-		o.logger.Errorf("Error storing tracks: %+v", err)
-
-		return nil, ErrInternal
-	}
-
-	res := make([]*pb.TrackData, len(tracks))
-	for i, track := range tracks {
-		res[i] = track.ToProto()
 	}
 
 	// that concerns current track and guild voice state
 	if affectedFirst {
+		if guild.ChannelID != in.ChannelID {
+			guild.ChannelID = in.ChannelID
+
+			_, err = guild.UpdateQuery(o.store).Column("channel_id").Exec(ctx)
+			if err != nil {
+				o.logger.Errorf("Error updating guild channel id: %+v", err)
+
+				return nil, ErrInternal
+			}
+		}
+
 		err = o.sendResync(ctx, bot.ID, guild.ID, ResyncTargetCurrent, ResyncTargetGuild)
 
 		if err != nil {
@@ -399,8 +391,51 @@ func (o *orcaServer) Play(ctx context.Context, in *pb.PlayRequest) (*pb.PlayRepl
 	}
 
 	return &pb.PlayReply{
-		Tracks: res,
+		Tracks: tracksData,
 	}, nil
+}
+
+func (o *orcaServer) addTracks(
+	ctx context.Context,
+	bot *models.RemoteBot,
+	guild *models.RemoteGuild,
+	url string,
+	position int,
+) ([]*pb.TrackData, bool, error) {
+	tracks, err := models.NewRemoteTracks(ctx, bot.ID, guild.ID, url, o.extractors)
+	if err != nil {
+		o.logger.Errorf("Error getting remote tracks: %+v", err)
+
+		return nil, false, ErrInternal
+	}
+
+	qlen, err := guild.TracksQuery(o.store).Count(ctx)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		o.logger.Errorf("Error getting tracks from store: %+v", err)
+
+		return nil, false, ErrInternal
+	}
+
+	prevOrdKey, nextOrdKey, affectedFirst := o.chooseOrdKeyRange(ctx, qlen, position)
+
+	models.SetOrdKeys(tracks, prevOrdKey, nextOrdKey)
+
+	_, err = o.store.
+		NewInsert().
+		Model(&tracks).
+		Exec(ctx)
+	if err != nil {
+		o.logger.Errorf("Error storing tracks: %+v", err)
+
+		return nil, false, ErrInternal
+	}
+
+	res := make([]*pb.TrackData, len(tracks))
+	for i, track := range tracks {
+		res[i] = track.ToProto()
+	}
+
+	return res, affectedFirst, nil
 }
 
 func (o *orcaServer) Skip(ctx context.Context, in *pb.GuildOnlyRequest) (*emptypb.Empty, error) {
@@ -408,7 +443,7 @@ func (o *orcaServer) Skip(ctx context.Context, in *pb.GuildOnlyRequest) (*emptyp
 	if err != nil {
 		o.logger.Errorf("Error authenticating request: %+v", err)
 
-		return nil, status.Error(codes.Unauthenticated, "failed to authenticate bot")
+		return nil, ErrFailedToAuthenticate
 	}
 
 	o.logger.Infof("Skipping track in guild %s", in.GuildID)
@@ -450,7 +485,7 @@ func (o *orcaServer) Stop(ctx context.Context, in *pb.GuildOnlyRequest) (*emptyp
 	if err != nil {
 		o.logger.Errorf("Error authenticating request: %+v", err)
 
-		return nil, status.Error(codes.Unauthenticated, "failed to authenticate bot")
+		return nil, ErrFailedToAuthenticate
 	}
 
 	o.logger.Infof("Stopping playback in guild %s", in.GuildID)
@@ -481,7 +516,7 @@ func (o *orcaServer) Seek(ctx context.Context, in *pb.SeekRequest) (*pb.SeekRepl
 	if err != nil {
 		o.logger.Errorf("Error authenticating request: %+v", err)
 
-		return nil, status.Error(codes.Unauthenticated, "failed to authenticate bot")
+		return nil, ErrFailedToAuthenticate
 	}
 
 	o.logger.Infof("Seeking to %.2fs in guild %s", in.Position.AsDuration().Seconds(), in.GuildID)
@@ -515,7 +550,7 @@ func (o *orcaServer) Loop(ctx context.Context, in *pb.GuildOnlyRequest) (*emptyp
 	if err != nil {
 		o.logger.Errorf("Error authenticating request: %+v", err)
 
-		return nil, status.Error(codes.Unauthenticated, "failed to authenticate bot")
+		return nil, ErrFailedToAuthenticate
 	}
 
 	_, err = guild.UpdateQuery(o.store).
@@ -535,7 +570,7 @@ func (o *orcaServer) ShuffleQueue(ctx context.Context, in *pb.GuildOnlyRequest) 
 	if err != nil {
 		o.logger.Errorf("Error authenticating request: %+v", err)
 
-		return nil, status.Error(codes.Unauthenticated, "failed to authenticate bot")
+		return nil, ErrFailedToAuthenticate
 	}
 
 	_, err = o.store.
@@ -573,7 +608,7 @@ func (o *orcaServer) GetTracks(ctx context.Context, in *pb.GetTracksRequest) (*p
 	if err != nil {
 		o.logger.Errorf("Error authenticating request: %+v", err)
 
-		return nil, status.Error(codes.Unauthenticated, "failed to authenticate bot")
+		return nil, ErrFailedToAuthenticate
 	}
 
 	var tracks []*models.RemoteTrack
@@ -618,7 +653,7 @@ func (o *orcaServer) Pause(ctx context.Context, in *pb.GuildOnlyRequest) (*empty
 	if err != nil {
 		o.logger.Errorf("Error authenticating request: %+v", err)
 
-		return nil, status.Error(codes.Unauthenticated, "failed to authenticate bot")
+		return nil, ErrFailedToAuthenticate
 	}
 
 	_, err = guild.
@@ -646,7 +681,7 @@ func (o *orcaServer) Resume(ctx context.Context, in *pb.GuildOnlyRequest) (*empt
 	if err != nil {
 		o.logger.Errorf("Error authenticating request: %+v", err)
 
-		return nil, status.Error(codes.Unauthenticated, "failed to authenticate bot")
+		return nil, ErrFailedToAuthenticate
 	}
 
 	_, err = guild.
@@ -664,6 +699,46 @@ func (o *orcaServer) Resume(ctx context.Context, in *pb.GuildOnlyRequest) (*empt
 		o.logger.Errorf("Error sending resync: %+v", err)
 
 		return nil, ErrInternal
+	}
+
+	return &emptypb.Empty{}, nil
+}
+
+func (o *orcaServer) Remove(ctx context.Context, in *pb.RemoveRequest) (*emptypb.Empty, error) {
+	bot, guild, err := o.authenticateWithGuild(ctx, in.GuildID)
+	if err != nil {
+		o.logger.Errorf("Error authenticating request: %+v", err)
+
+		return nil, ErrFailedToAuthenticate
+	}
+
+	// should be at least 0
+	position := max(0, int(in.Position))
+
+	_, err = o.store.NewDelete().
+		Model((*models.RemoteTrack)(nil)).
+		ModelTableExpr("tracks").
+		TableExpr("tracks INNER JOIN (?) AS target", guild.PositionTrackQuery(o.store, position).Column("id")).
+		Where("tracks.id = target.id").
+		Exec(ctx)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			// consider it successfully deleted
+			return &emptypb.Empty{}, nil
+		}
+
+		o.logger.Errorf("Error deleting track from queue: %+v", err)
+
+		return nil, ErrInternal
+	}
+
+	if position == 0 {
+		err = o.sendResync(ctx, bot.ID, guild.ID, ResyncTargetCurrent)
+		if err != nil {
+			o.logger.Errorf("Error sending resync: %+v", err)
+
+			return nil, ErrInternal
+		}
 	}
 
 	return &emptypb.Empty{}, nil
@@ -726,7 +801,7 @@ func doMigrate(ctx context.Context, logger *zap.SugaredLogger, db *bun.DB) error
 	return nil
 }
 
-func run(ctx context.Context, logger *zap.SugaredLogger) error { //nolint:funlen // fixme
+func run(ctx context.Context, logger *zap.SugaredLogger) error { //nolint:funlen,cyclop // FIXME
 	st, err := store.NewStore(logger, &store.Config{
 		DB: store.DBConfig{
 			Host:     "127.0.0.1",
@@ -759,6 +834,36 @@ func run(ctx context.Context, logger *zap.SugaredLogger) error { //nolint:funlen
 	}
 
 	orca := newOrcaServer(logger, st)
+
+	orca.extractors.AddExtractor(ytdl.New(orca.logger))
+
+	sfile, err := os.Open(".spotify") // TODO: replace with proper config
+	if err != nil {
+		return err //nolint:wrapcheck
+	}
+
+	r := bufio.NewReader(sfile)
+
+	cid, err := r.ReadString('\n')
+	if err != nil {
+		return err //nolint:wrapcheck
+	}
+
+	cs, err := r.ReadString('\n')
+	if err != nil {
+		return err //nolint:wrapcheck
+	}
+
+	s, err := spotify.New( // TODO: conditionally create based on config
+		ctx,
+		strings.TrimSpace(cid),
+		strings.TrimSpace(cs),
+	)
+	if err != nil {
+		return errorx.Decorate(err, "init spotify module")
+	}
+
+	orca.extractors.AddExtractor(s)
 
 	err = orca.initFromStore(ctx)
 	if err != nil {

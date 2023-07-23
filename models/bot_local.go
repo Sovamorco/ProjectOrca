@@ -5,6 +5,8 @@ import (
 	"sync"
 	"time"
 
+	"ProjectOrca/extractor"
+
 	"ProjectOrca/store"
 
 	"github.com/bwmarrin/discordgo"
@@ -15,21 +17,25 @@ import (
 
 type Bot struct {
 	// constant values
-	logger  *zap.SugaredLogger
-	store   *store.Store
-	session *discordgo.Session
+	logger     *zap.SugaredLogger
+	store      *store.Store
+	extractors *extractor.Extractors
+	session    *discordgo.Session
 
 	// potentially changeable lockable values
 	guilds   map[string]*Guild
 	guildsMu sync.Mutex `exhaustruct:"optional"`
 }
 
-func NewBot(logger *zap.SugaredLogger, store *store.Store, token string) (*Bot, error) {
+func NewBot(
+	logger *zap.SugaredLogger, store *store.Store, extractors *extractor.Extractors, token string,
+) (*Bot, error) {
 	b := Bot{
-		logger:  logger.Named("bot"),
-		store:   store,
-		session: nil,
-		guilds:  make(map[string]*Guild),
+		logger:     logger.Named("bot"),
+		store:      store,
+		extractors: extractors,
+		session:    nil,
+		guilds:     make(map[string]*Guild),
 	}
 
 	sess, err := startSession(token)
@@ -190,7 +196,7 @@ func (b *Bot) getGuild(ctx context.Context, guildID string) *Guild {
 
 	local, ok := b.guilds[guildID]
 	if !ok {
-		local = NewGuild(ctx, guildID, b.GetID(), b.session, b.logger, b.store)
+		local = NewGuild(ctx, guildID, b.GetID(), b.session, b.logger, b.store, b.extractors)
 		b.guilds[guildID] = local
 	}
 

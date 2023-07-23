@@ -7,21 +7,21 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"strings"
 	"sync"
 	"time"
 
-	"ProjectOrca/store"
-	"ProjectOrca/utils"
+	"ProjectOrca/extractor"
 
+	"ProjectOrca/store"
 	"github.com/joomcode/errorx"
 	"go.uber.org/zap"
 )
 
 type LocalTrack struct {
 	// constant values
-	logger *zap.SugaredLogger
-	store  *store.Store
+	logger     *zap.SugaredLogger
+	store      *store.Store
+	extractors *extractor.Extractors
 
 	// potentially changeable lockable values
 	remote   *RemoteTrack
@@ -35,14 +35,15 @@ type LocalTrack struct {
 	posMu sync.RWMutex `exhaustruct:"optional"`
 }
 
-func NewLocalTrack(logger *zap.SugaredLogger, store *store.Store) *LocalTrack {
+func NewLocalTrack(logger *zap.SugaredLogger, store *store.Store, extractors *extractor.Extractors) *LocalTrack {
 	return &LocalTrack{
-		logger: logger.Named("track"),
-		store:  store,
-		remote: nil,
-		cmd:    nil,
-		stream: nil,
-		pos:    0,
+		logger:     logger.Named("track"),
+		store:      store,
+		extractors: extractors,
+		remote:     nil,
+		cmd:        nil,
+		stream:     nil,
+		pos:        0,
 	}
 }
 
@@ -59,7 +60,7 @@ func (t *LocalTrack) initialize(ctx context.Context) error {
 
 	err := t.setStreamURL(ctx, remote)
 	if err != nil {
-		if remote.URL == "" {
+		if remote.StreamURL == "" {
 			return errorx.Decorate(err, "get stream url")
 		}
 
@@ -75,14 +76,14 @@ func (t *LocalTrack) initialize(ctx context.Context) error {
 }
 
 func (t *LocalTrack) setStreamURL(ctx context.Context, remote *RemoteTrack) error {
-	urlB, err := utils.GetYTDLPOutput(t.logger, "--get-url", remote.OriginalURL)
+	url, err := t.extractors.ExtractStreamURL(ctx, remote.ExtractionURL)
 	if err != nil {
-		return errorx.Decorate(err, "get stream url")
+		return errorx.Decorate(err, "extract stream url")
 	}
 
-	remote.URL = strings.TrimSpace(string(urlB))
+	remote.StreamURL = url
 
-	_, err = t.store.NewUpdate().Model(remote).Column("url").WherePK().Exec(ctx)
+	_, err = t.store.NewUpdate().Model(remote).Column("stream_url").WherePK().Exec(ctx)
 	if err != nil {
 		return errorx.Decorate(err, "store url")
 	}
@@ -106,7 +107,7 @@ func (t *LocalTrack) startStream(remote *RemoteTrack) error {
 	}
 
 	ffmpegArgs = append(ffmpegArgs,
-		"-i", remote.URL,
+		"-i", remote.StreamURL,
 		"-map", "0:a",
 		// "-filter:a", "dynaudnorm=p=0.9:r=0.5", // makes metal sound dogshit :( TODO: revisit
 		"-acodec", "libopus",

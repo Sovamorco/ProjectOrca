@@ -2,7 +2,6 @@ package models
 
 import (
 	"ProjectOrca/store"
-
 	"github.com/uptrace/bun"
 )
 
@@ -34,10 +33,19 @@ func (g *RemoteGuild) UpdateQuery(store *store.Store) *bun.UpdateQuery {
 }
 
 func (g *RemoteGuild) CurrentTrackQuery(store *store.Store) *bun.SelectQuery {
+	return g.PositionTrackQuery(store, 0)
+}
+
+func (g *RemoteGuild) PositionTrackQuery(store *store.Store, position int) *bun.SelectQuery {
+	return g.TracksQuery(store).
+		Order("ord_key").
+		Offset(position).
+		Limit(1)
+}
+
+func (g *RemoteGuild) TracksQuery(store *store.Store) *bun.SelectQuery {
 	return store.
 		NewSelect().
 		Model((*RemoteTrack)(nil)).
-		Where("bot_id = ? AND guild_id = ?", g.BotID, g.ID).
-		Order("ord_key").
-		Limit(1)
+		Where("bot_id = ? AND guild_id = ?", g.BotID, g.ID)
 }

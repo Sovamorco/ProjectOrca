@@ -17,6 +17,7 @@ service Orca {
   rpc Resume (GuildOnlyRequest) returns (google.protobuf.Empty) {}
   rpc Loop (GuildOnlyRequest) returns (google.protobuf.Empty) {}
   rpc ShuffleQueue(GuildOnlyRequest) returns (google.protobuf.Empty) {}
+  rpc Remove(RemoveRequest) returns (google.protobuf.Empty) {}
 }
 
 message JoinRequest {
@@ -37,7 +38,7 @@ message PlayReply {
 
 message TrackData {
   string title = 1;
-  string originalURL = 2;
+  string displayURL = 2;
   bool live = 3;
   google.protobuf.Duration position = 4;
   google.protobuf.Duration duration = 5;
@@ -64,4 +65,9 @@ message GetTracksReply {
   repeated TrackData tracks = 1;
   int64 totalTracks = 2;
   bool looping = 3;
+}
+
+message RemoveRequest{
+  string guildID = 1;
+  int64 position = 2;
 }

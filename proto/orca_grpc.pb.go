@@ -34,6 +34,7 @@ type OrcaClient interface {
 	Resume(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	Loop(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	ShuffleQueue(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	Remove(ctx context.Context, in *RemoveRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 }
 
 type orcaClient struct {
@@ -143,6 +144,15 @@ func (c *orcaClient) ShuffleQueue(ctx context.Context, in *GuildOnlyRequest, opt
 	return out, nil
 }
 
+func (c *orcaClient) Remove(ctx context.Context, in *RemoveRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, "/orca.Orca/Remove", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // OrcaServer is the server API for Orca service.
 // All implementations must embed UnimplementedOrcaServer
 // for forward compatibility
@@ -158,6 +168,7 @@ type OrcaServer interface {
 	Resume(context.Context, *GuildOnlyRequest) (*emptypb.Empty, error)
 	Loop(context.Context, *GuildOnlyRequest) (*emptypb.Empty, error)
 	ShuffleQueue(context.Context, *GuildOnlyRequest) (*emptypb.Empty, error)
+	Remove(context.Context, *RemoveRequest) (*emptypb.Empty, error)
 	mustEmbedUnimplementedOrcaServer()
 }
 
@@ -197,6 +208,9 @@ func (UnimplementedOrcaServer) Loop(context.Context, *GuildOnlyRequest) (*emptyp
 }
 func (UnimplementedOrcaServer) ShuffleQueue(context.Context, *GuildOnlyRequest) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ShuffleQueue not implemented")
+}
+func (UnimplementedOrcaServer) Remove(context.Context, *RemoveRequest) (*emptypb.Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Remove not implemented")
 }
 func (UnimplementedOrcaServer) mustEmbedUnimplementedOrcaServer() {}
 
@@ -409,6 +423,24 @@ func _Orca_ShuffleQueue_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Orca_Remove_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RemoveRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrcaServer).Remove(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/orca.Orca/Remove",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrcaServer).Remove(ctx, req.(*RemoveRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Orca_ServiceDesc is the grpc.ServiceDesc for Orca service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -459,6 +491,10 @@ var Orca_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ShuffleQueue",
 			Handler:    _Orca_ShuffleQueue_Handler,
+		},
+		{
+			MethodName: "Remove",
+			Handler:    _Orca_Remove_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
