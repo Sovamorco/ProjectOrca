@@ -187,7 +187,7 @@ func (b *Bot) ResyncGuilds(ctx context.Context) error {
 
 func (b *Bot) ResyncGuildTrack(ctx context.Context, guildID string, seekPos time.Duration) {
 	local := b.getGuild(ctx, guildID)
-	local.ResyncPlaying()
+	local.ResyncPlaying(seekPos)
 }
 
 func (b *Bot) getGuild(ctx context.Context, guildID string) *Guild {

@@ -33,6 +33,9 @@ type LocalTrack struct {
 	// pos is duplicated here to leave remote concurrency-safe
 	pos   time.Duration
 	posMu sync.RWMutex `exhaustruct:"optional"`
+
+	// seek channel, weird, but I didn't find better ideas on how to make seeking consistent
+	seek chan time.Duration
 }
 
 func NewLocalTrack(logger *zap.SugaredLogger, store *store.Store, extractors *extractor.Extractors) *LocalTrack {
@@ -44,6 +47,8 @@ func NewLocalTrack(logger *zap.SugaredLogger, store *store.Store, extractors *ex
 		cmd:        nil,
 		stream:     nil,
 		pos:        0,
+
+		seek: make(chan time.Duration, 1),
 	}
 }
 

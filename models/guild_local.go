@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"ProjectOrca/utils"
+
 	"ProjectOrca/extractor"
 
 	"ProjectOrca/store"
@@ -117,7 +119,15 @@ func (g *Guild) gracefulShutdown() {
 	}
 }
 
-func (g *Guild) ResyncPlaying() {
+func (g *Guild) ResyncPlaying(seekPos time.Duration) {
+	if seekPos != utils.MinDuration {
+		// make sure this does not block
+		select {
+		case g.track.seek <- seekPos:
+		default:
+		}
+	}
+
 	// make sure this does not block
 	select {
 	case g.resyncPlaying <- struct{}{}:
@@ -130,12 +140,6 @@ func (g *Guild) storeLoop(ctx context.Context) {
 	defer ticker.Stop()
 
 	for {
-		select {
-		case <-g.storeLoopDone:
-			return
-		case <-ticker.C:
-		}
-
 		if remote, pos := g.track.getRemote(), g.track.getPos(); remote != nil {
 			_, err := g.store.
 				NewUpdate().
@@ -146,6 +150,12 @@ func (g *Guild) storeLoop(ctx context.Context) {
 			if err != nil {
 				g.logger.Errorf("Error storing track position: %+v", err)
 			}
+		}
+
+		select {
+		case <-g.storeLoopDone:
+			return
+		case <-ticker.C:
 		}
 	}
 }

@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/hashicorp/go-multierror"
+
 	"ProjectOrca/extractor"
 	"ProjectOrca/spotify"
 	"ProjectOrca/ytdl"
@@ -56,14 +58,26 @@ type ResyncMessage struct {
 	SeekPos time.Duration `json:"seek_pos"`
 }
 
+type HealthcheckMessageType int
+
+type HealthcheckMessage struct {
+	Sender string                 `json:"sender"`
+	Target string                 `json:"target"`
+	Type   HealthcheckMessageType `json:"type"`
+}
+
 const (
 	MigrationsTimeout   = time.Second * 300
 	DeathrattlesChannel = "deathrattles"
 	ResyncsChannel      = "resync"
+	HealthchecksChannel = "health_checks"
 
 	edgeOrdKeyDiff    = 100
 	defaultPrevOrdKey = 0
 	defaultNextOrdKey = defaultPrevOrdKey + edgeOrdKeyDiff
+
+	healthcheckTimeout   = 5 * time.Second
+	healthcheckFrequency = 1 * time.Minute
 )
 
 // resync targets.
@@ -72,19 +86,36 @@ const (
 	ResyncTargetGuild
 )
 
+// healthcheck message types.
+const (
+	HealthcheckMessageRequest HealthcheckMessageType = iota
+	HealthcheckMessageResponse
+)
+
 var (
 	ErrFailedToAuthenticate = status.Error(codes.Unauthenticated, "failed to authenticate bot")
 	ErrInternal             = status.Error(codes.Internal, "internal error")
+	ErrInvalidValue         = errors.New("invalid value")
+
+	ErrUnknownHealthcheckMessageType = errors.New("unknown healthcheck message type")
 )
 
 type orcaServer struct {
 	pb.UnimplementedOrcaServer `exhaustruct:"optional"`
 
+	// static values
 	id         string
-	states     []*models.Bot
 	logger     *zap.SugaredLogger
 	store      *store.Store
 	extractors *extractor.Extractors
+
+	// changeable values with locks
+	states   []*models.Bot
+	statesMu sync.RWMutex `exhaustruct:"optional"`
+
+	// concurrency-safe
+	healthcheckRequests sync.Map
+	healthcheckLoopStop chan struct{}
 }
 
 func newOrcaServer(logger *zap.SugaredLogger, st *store.Store) *orcaServer {
@@ -92,17 +123,29 @@ func newOrcaServer(logger *zap.SugaredLogger, st *store.Store) *orcaServer {
 
 	return &orcaServer{
 		id:         uuid.New().String(),
-		states:     make([]*models.Bot, 0),
 		logger:     serverLogger,
 		store:      st,
 		extractors: extractor.NewExtractors(),
+
+		states: make([]*models.Bot, 0),
+
+		healthcheckRequests: sync.Map{},
+		healthcheckLoopStop: make(chan struct{}, 1),
 	}
 }
 
 func (o *orcaServer) gracefulShutdown(ctx context.Context) {
+	// make sure this does not block
+	select {
+	case o.healthcheckLoopStop <- struct{}{}:
+	default:
+	}
+
+	o.statesMu.RLock()
 	for _, state := range o.states {
 		state.GracefulShutdown()
 	}
+	o.statesMu.RUnlock()
 
 	_, err := o.store.
 		NewUpdate().
@@ -154,7 +197,9 @@ func (o *orcaServer) initFromStore(ctx context.Context) error {
 			o.logger.Errorf("Could not create local state for remote state %s: %+v", state.ID, err)
 		}
 
+		o.statesMu.Lock()
 		o.states = append(o.states, localState)
+		o.statesMu.Unlock()
 
 		go localState.FullResync(ctx)
 	}
@@ -163,6 +208,9 @@ func (o *orcaServer) initFromStore(ctx context.Context) error {
 }
 
 func (o *orcaServer) getStateByToken(token string) *models.Bot {
+	o.statesMu.RLock()
+	defer o.statesMu.RUnlock()
+
 	for _, state := range o.states {
 		if state.GetToken() == token {
 			return state
@@ -174,6 +222,9 @@ func (o *orcaServer) getStateByToken(token string) *models.Bot {
 
 // do not use for authentication-related purposes.
 func (o *orcaServer) getStateByID(id string) *models.Bot {
+	o.statesMu.RLock()
+	defer o.statesMu.RUnlock()
+
 	for _, state := range o.states {
 		if state.GetID() == id {
 			return state
@@ -285,7 +336,9 @@ func (o *orcaServer) register(ctx context.Context, token string) (*models.Remote
 		return nil, errorx.Decorate(err, "store remote bot state")
 	}
 
+	o.statesMu.Lock()
 	o.states = append(o.states, state)
+	o.statesMu.Unlock()
 
 	return r, nil
 }
@@ -865,16 +918,16 @@ func run(ctx context.Context, logger *zap.SugaredLogger) error { //nolint:funlen
 
 	orca.extractors.AddExtractor(s)
 
+	orca.store.Subscribe(ctx, orca.handleDeathrattle, DeathrattlesChannel)
+	orca.store.Subscribe(ctx, orca.handleResync, ResyncsChannel)
+	orca.store.Subscribe(ctx, orca.handleHealthcheck, HealthchecksChannel)
+
 	err = orca.initFromStore(ctx)
 	if err != nil {
 		return errorx.Decorate(err, "init from store")
 	}
 
-	psdr := orca.store.Subscribe(ctx, DeathrattlesChannel)
-	go orca.handleDeathrattle(ctx, psdr.Channel())
-
-	psrs := orca.store.Subscribe(ctx, ResyncsChannel)
-	go orca.handleResync(ctx, psrs.Channel())
+	go orca.sendHealthchecksLoop(ctx)
 
 	grpcServer := grpc.NewServer()
 	pb.RegisterOrcaServer(grpcServer, orca)
@@ -904,40 +957,22 @@ func run(ctx context.Context, logger *zap.SugaredLogger) error { //nolint:funlen
 	}
 }
 
-func (o *orcaServer) handleDeathrattle(ctx context.Context, ch <-chan *redis.Message) {
-	logger := o.logger.Named("sub_deathrattles")
+func (o *orcaServer) handleDeathrattle(ctx context.Context, logger *zap.SugaredLogger, msg *redis.Message) error {
+	dm := new(DeathrattleMessage)
 
-	var wg sync.WaitGroup
-
-	for msg := range ch {
-		msg := msg
-
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
-			logger.Debugf("Received deathrattle: %s", msg.Payload)
-
-			dm := new(DeathrattleMessage)
-
-			err := json.Unmarshal([]byte(msg.Payload), dm)
-			if err != nil {
-				logger.Errorf("Error unmarshalling deathrattle: %+v", err)
-
-				return
-			}
-
-			o.logger.Infof("Handling deathrattle from %s", dm.Deceased)
-
-			err = o.initFromStore(ctx)
-			if err != nil {
-				logger.Errorf("Error reinitializing after deathrattle: %+v", err)
-			}
-		}()
+	err := json.Unmarshal([]byte(msg.Payload), dm)
+	if err != nil {
+		return errorx.Decorate(err, "unmarshal deathrattle")
 	}
 
-	wg.Wait()
+	logger.Infof("Handling deathrattle from %s", dm.Deceased)
+
+	err = o.initFromStore(ctx)
+	if err != nil {
+		return errorx.Decorate(err, "init after deathrattle")
+	}
+
+	return nil
 }
 
 func (o *orcaServer) sendDeathrattle(ctx context.Context) {
@@ -956,7 +991,7 @@ func (o *orcaServer) sendDeathrattle(ctx context.Context) {
 	}
 }
 
-func (o *orcaServer) doResync(ctx context.Context, managed *models.Bot, r *ResyncMessage) {
+func (o *orcaServer) doResync(ctx context.Context, logger *zap.SugaredLogger, managed *models.Bot, r *ResyncMessage) {
 	var wg sync.WaitGroup
 
 	for _, target := range r.Targets {
@@ -971,7 +1006,7 @@ func (o *orcaServer) doResync(ctx context.Context, managed *models.Bot, r *Resyn
 			case ResyncTargetGuild:
 				err := managed.ResyncGuild(ctx, r.Guild)
 				if err != nil {
-					o.logger.Errorf("Error resyncing guild: %+v", err)
+					logger.Errorf("Error resyncing guild: %+v", err)
 				}
 			case ResyncTargetCurrent:
 				managed.ResyncGuildTrack(ctx, r.Guild, r.SeekPos)
@@ -982,42 +1017,24 @@ func (o *orcaServer) doResync(ctx context.Context, managed *models.Bot, r *Resyn
 	wg.Wait()
 }
 
-func (o *orcaServer) handleResync(ctx context.Context, ch <-chan *redis.Message) {
-	logger := o.logger.Named("sub_resync")
+func (o *orcaServer) handleResync(ctx context.Context, logger *zap.SugaredLogger, msg *redis.Message) error {
+	r := new(ResyncMessage)
 
-	var wg sync.WaitGroup
-
-	for msg := range ch {
-		msg := msg
-
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
-			logger.Debugf("Received resync: %s", msg.Payload)
-
-			r := new(ResyncMessage)
-
-			err := json.Unmarshal([]byte(msg.Payload), r)
-			if err != nil {
-				logger.Errorf("Error unmarshalling resync: %+v", err)
-
-				return
-			}
-
-			managed := o.getStateByID(r.Bot)
-			if managed == nil {
-				logger.Debugf("Resync message for non-managed recipient %s, skipping", r.Bot)
-
-				return
-			}
-
-			o.doResync(ctx, managed, r)
-		}()
+	err := json.Unmarshal([]byte(msg.Payload), r)
+	if err != nil {
+		return errorx.Decorate(err, "unmarshal resync")
 	}
 
-	wg.Wait()
+	managed := o.getStateByID(r.Bot)
+	if managed == nil {
+		logger.Debugf("Resync message for non-managed recipient %s, skipping", r.Bot)
+
+		return nil
+	}
+
+	o.doResync(ctx, logger, managed, r)
+
+	return nil
 }
 
 func (o *orcaServer) sendResync(ctx context.Context, botID, guildID string, targets ...ResyncTarget) error {
@@ -1048,6 +1065,180 @@ func (o *orcaServer) sendResyncSeek(
 	return nil
 }
 
+func (o *orcaServer) handleHealthcheck(ctx context.Context, _ *zap.SugaredLogger, msg *redis.Message) error {
+	h := new(HealthcheckMessage)
+
+	err := json.Unmarshal([]byte(msg.Payload), h)
+	if err != nil {
+		return errorx.Decorate(err, "unmarshal healthcheck")
+	}
+
+	if h.Target != o.id {
+		return nil
+	}
+
+	switch h.Type {
+	case HealthcheckMessageRequest:
+		return o.sendHealthcheckMessage(ctx, h.Sender, HealthcheckMessageResponse)
+	case HealthcheckMessageResponse:
+		return o.handleHealthcheckResponse(ctx, h.Sender)
+	default:
+		return ErrUnknownHealthcheckMessageType
+	}
+}
+
+func (o *orcaServer) sendHealthcheckMessage(ctx context.Context, target string, mtype HealthcheckMessageType) error {
+	res := HealthcheckMessage{
+		Sender: o.id,
+		Target: target,
+		Type:   mtype,
+	}
+
+	b, err := json.Marshal(res)
+	if err != nil {
+		return errorx.Decorate(err, "marshal")
+	}
+
+	err = o.store.Publish(ctx, HealthchecksChannel, b).Err()
+	if err != nil {
+		return errorx.Decorate(err, "publish")
+	}
+
+	return nil
+}
+
+func (o *orcaServer) handleHealthcheckResponse(_ context.Context, sender string) error {
+	hrI, ok := o.healthcheckRequests.LoadAndDelete(sender)
+	if !ok {
+		// ignore
+		return nil
+	}
+
+	hr, ok := hrI.(chan struct{})
+	if !ok {
+		return ErrInvalidValue
+	}
+
+	hr <- struct{}{}
+
+	return nil
+}
+
+func (o *orcaServer) sendHealthchecksLoop(ctx context.Context) {
+	ticker := time.NewTicker(healthcheckFrequency)
+	defer ticker.Stop()
+
+	for {
+		err := o.sendHealthchecks(ctx)
+		if err != nil {
+			o.logger.Errorf("Error sending healthchecks: %+v", err)
+		}
+
+		select {
+		case <-o.healthcheckLoopStop:
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func (o *orcaServer) sendHealthchecks(ctx context.Context) error {
+	rows, err := o.store.
+		NewSelect().
+		Model((*models.RemoteBot)(nil)).
+		Column("locker").
+		Where("locker IS NOT NULL AND locker != ?", o.id).
+		Group("locker").
+		Rows(ctx)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+
+		return errorx.Decorate(err, "get bots")
+	}
+
+	defer func() {
+		err := rows.Close()
+		if err != nil {
+			o.logger.Errorf("Error closing rows: %+v", err)
+		}
+	}()
+
+	var eg multierror.Group
+
+	for {
+		if !rows.Next() {
+			if ierr := rows.Err(); ierr != nil {
+				err = multierror.Append(err, ierr)
+			}
+
+			break
+		}
+
+		var locker string
+
+		ierr := rows.Scan(&locker)
+		if ierr != nil {
+			err = multierror.Append(err, ierr)
+
+			continue
+		}
+
+		eg.Go(func() error {
+			return o.sendHealthcheck(ctx, locker)
+		})
+	}
+
+	err = multierror.Append(err, eg.Wait()).ErrorOrNil()
+	if err != nil {
+		return errorx.Decorate(err, "send healthchecks")
+	}
+
+	err = o.initFromStore(ctx)
+	if err != nil {
+		return errorx.Decorate(err, "init after healthcheck")
+	}
+
+	return nil
+}
+
+func (o *orcaServer) sendHealthcheck(ctx context.Context, locker string) error {
+	cancel := make(chan struct{}, 1)
+
+	o.healthcheckRequests.Store(locker, cancel)
+
+	o.logger.Debugf("Sending healthcheck message to %s", locker)
+
+	err := o.sendHealthcheckMessage(ctx, locker, HealthcheckMessageRequest)
+	if err != nil {
+		return errorx.Decorate(err, "send healthcheck message")
+	}
+
+	select {
+	case <-cancel:
+		o.logger.Debugf("Got healthcheck response from %s, cancelling takeover", locker)
+
+		return nil
+	case <-time.After(healthcheckTimeout):
+	}
+
+	o.healthcheckRequests.Delete(locker)
+	o.logger.Debugf("Did not get healthcheck response from %s in time, taking over", locker)
+
+	// unlock all bots held by unresponsive locker
+	_, err = o.store.NewUpdate().
+		Model((*models.RemoteBot)(nil)).
+		Set("locker = NULL").
+		Where("locker = ?", locker).
+		Exec(ctx)
+	if err != nil {
+		return errorx.Decorate(err, "unlock bots")
+	}
+
+	return nil
+}
+
 func (o *orcaServer) chooseOrdKeyRange(ctx context.Context, qlen, position int) (float64, float64, bool) {
 	// special case - if no tracks in queue - insert all tracks with ordkeys from 0 to 100
 	if qlen == 0 {
@@ -1071,10 +1262,6 @@ func (o *orcaServer) chooseOrdKeyRange(ctx context.Context, qlen, position int) 
 		Offset(max(position-1, 0)). // have a separate check for position 0 later
 		Limit(2).                   //nolint:gomnd // previous and next track in theory
 		Rows(ctx)
-	if err == nil {
-		err = rows.Err()
-	}
-
 	if err != nil {
 		o.logger.Errorf("Error getting ordkeys from store: %+v", err)
 
@@ -1095,6 +1282,12 @@ func (o *orcaServer) chooseOrdKeyRangeFromRows(position int, rows *sql.Rows) (fl
 	var prevOrdKey, nextOrdKey float64
 
 	rows.Next()
+
+	if err := rows.Err(); err != nil {
+		o.logger.Errorf("Error getting next row: %+v", err)
+
+		return defaultPrevOrdKey, defaultNextOrdKey, true
+	}
 
 	// special case - there is no track preceding the position, prevOrdKey should be nextOrdKey - 100
 	if position == 0 {
@@ -1117,6 +1310,12 @@ func (o *orcaServer) chooseOrdKeyRangeFromRows(position int, rows *sql.Rows) (fl
 
 	// special case - there is no track succeeding the position, nextOrdKey should be prevOrdKey + 100
 	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			o.logger.Errorf("Error getting next row: %+v", err)
+
+			return defaultPrevOrdKey, defaultNextOrdKey, true
+		}
+
 		nextOrdKey = prevOrdKey + edgeOrdKeyDiff
 	} else {
 		err = rows.Scan(&nextOrdKey)

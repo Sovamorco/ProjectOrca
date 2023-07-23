@@ -82,18 +82,6 @@ func (s *Store) GracefulShutdown() {
 	}
 }
 
-func (s *Store) Subscribe(ctx context.Context, channels ...string) *redis.PubSub {
-	ps := s.Client.Subscribe(ctx, channels...)
-	s.unsubFuncs = append(s.unsubFuncs, func(ctx context.Context) {
-		err := ps.Unsubscribe(ctx, channels...)
-		if err != nil {
-			s.logger.Errorf("Error unsubscribing from channels: %+v", err)
-		}
-	})
-
-	return ps
-}
-
 func (s *Store) Unsubscribe(ctx context.Context) {
 	var wg sync.WaitGroup
 

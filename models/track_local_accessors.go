@@ -20,7 +20,12 @@ func (t *LocalTrack) setRemote(v *RemoteTrack) {
 	t.remote = v
 
 	if v != nil {
-		t.setPos(v.Pos)
+		select {
+		case seekPos := <-t.seek:
+			t.setPos(seekPos)
+		default:
+			t.setPos(v.Pos)
+		}
 	}
 }
 
