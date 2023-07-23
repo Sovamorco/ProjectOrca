@@ -10,8 +10,6 @@ import (
 
 	"ProjectOrca/extractor"
 
-	"ProjectOrca/utils"
-
 	"ProjectOrca/store"
 
 	"github.com/bwmarrin/discordgo"
@@ -42,6 +40,7 @@ type Guild struct {
 	logger     *zap.SugaredLogger
 	store      *store.Store
 	extractors *extractor.Extractors
+	track      *LocalTrack
 
 	// signal channels
 	storeLoopDone chan struct{}
@@ -51,10 +50,8 @@ type Guild struct {
 	playing       chan struct{}
 
 	// potentially changeable lockable values
-	vc      *discordgo.VoiceConnection
-	vcMu    sync.RWMutex `exhaustruct:"optional"`
-	track   *LocalTrack
-	trackMu sync.RWMutex `exhaustruct:"optional"`
+	vc   *discordgo.VoiceConnection
+	vcMu sync.RWMutex `exhaustruct:"optional"`
 }
 
 func NewGuild(
@@ -97,20 +94,6 @@ func (g *Guild) getVC() *discordgo.VoiceConnection {
 	return g.vc
 }
 
-func (g *Guild) getTrack() *LocalTrack {
-	g.trackMu.RLock()
-	defer g.trackMu.RUnlock()
-
-	return g.track
-}
-
-func (g *Guild) setTrack(v *LocalTrack) {
-	g.trackMu.Lock()
-	defer g.trackMu.Unlock()
-
-	g.track = v
-}
-
 func (g *Guild) gracefulShutdown() {
 	if g.getVC() != nil {
 		g.vcMu.Lock()
@@ -134,45 +117,7 @@ func (g *Guild) gracefulShutdown() {
 	}
 }
 
-func (g *Guild) subTrack(ctx context.Context, seekPos time.Duration) error {
-	track, err := g.getNextTrack(ctx)
-	if err != nil {
-		return errorx.Decorate(err, "get next track")
-	}
-
-	l := NewLocalTrack(g.logger, g.store, g.extractors)
-	l.setRemote(track)
-
-	if seekPos != utils.MinDuration {
-		l.setPos(seekPos)
-	}
-
-	err = l.initialize(ctx)
-	if err != nil {
-		return errorx.Decorate(err, "initialize track")
-	}
-
-	old := g.getTrack()
-	g.setTrack(l)
-
-	old.cleanup()
-
-	return nil
-}
-
-func (g *Guild) ResyncPlaying(ctx context.Context, seekPos time.Duration) {
-	// try to change the track ourselves
-	err := g.subTrack(ctx, seekPos)
-	if err != nil {
-		if !errors.Is(err, ErrEmptyQueue) {
-			g.logger.Errorf("Error substituting track: %+v", err)
-		}
-
-		track := g.getTrack()
-		track.setRemote(nil)
-		track.cleanup()
-	}
-
+func (g *Guild) ResyncPlaying() {
 	// make sure this does not block
 	select {
 	case g.resyncPlaying <- struct{}{}:
@@ -191,8 +136,7 @@ func (g *Guild) storeLoop(ctx context.Context) {
 		case <-ticker.C:
 		}
 
-		track := g.getTrack()
-		if remote, pos := track.getRemote(), track.getPos(); remote != nil {
+		if remote, pos := g.track.getRemote(), g.track.getPos(); remote != nil {
 			_, err := g.store.
 				NewUpdate().
 				Model(remote).
@@ -248,7 +192,7 @@ func (g *Guild) playLoop(ctx context.Context) { //nolint:cyclop // FIXME
 			continue
 		}
 
-		err = g.getTrack().getPacket(packet)
+		err = g.track.getPacket(packet)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				err = g.stop(ctx)
@@ -260,7 +204,7 @@ func (g *Guild) playLoop(ctx context.Context) { //nolint:cyclop // FIXME
 			}
 
 			g.logger.Errorf("Error getting packet from stream: %+v", err)
-			g.getTrack().cleanup()
+			g.track.cleanup()
 
 			continue
 		}
@@ -277,16 +221,23 @@ func (g *Guild) playLoop(ctx context.Context) { //nolint:cyclop // FIXME
 
 		g.vcMu.RUnlock()
 
-		track := g.getTrack()
-		if remote := track.getRemote(); remote != nil && !remote.Live {
-			track.setPos(track.getPos() + frameSizeMs*time.Millisecond)
+		if remote := g.track.getRemote(); remote != nil && !remote.Live {
+			g.track.setPos(g.track.getPos() + frameSizeMs*time.Millisecond)
 		}
 	}
 }
 
 // playLoopPreconditions checks for all the preconditions for playing the track.
 func (g *Guild) playLoopPreconditions(ctx context.Context) (bool, error) { //nolint:cyclop // FIXME
-	if g.getTrack().getRemote() == nil {
+	// if we need to resync playing - reset current playing track
+	select {
+	case <-g.resyncPlaying:
+		g.track.setRemote(nil)
+		g.track.cleanup()
+	default:
+	}
+
+	if g.track.getRemote() == nil {
 		err := g.checkForNextTrack(ctx)
 
 		if errors.Is(err, ErrShuttingDown) { //nolint:gocritic // I swear if else here is better
@@ -314,12 +265,12 @@ func (g *Guild) playLoopPreconditions(ctx context.Context) (bool, error) { //nol
 		}
 	}
 
-	if track := g.getTrack(); !track.initialized() {
-		err := track.initialize(ctx)
+	if !g.track.initialized() {
+		err := g.track.initialize(ctx)
 		if err != nil {
 			g.logger.Errorf("Error initializing track: %+v", err)
 
-			track.setRemote(nil)
+			g.track.setRemote(nil)
 
 			return false, nil
 		}
@@ -338,7 +289,7 @@ func (g *Guild) playLoopPreconditions(ctx context.Context) (bool, error) { //nol
 func (g *Guild) checkForNextTrack(ctx context.Context) error {
 	track, err := g.getNextTrack(ctx)
 	if err == nil {
-		g.getTrack().setRemote(track)
+		g.track.setRemote(track)
 
 		return nil
 	}
@@ -406,11 +357,10 @@ func (g *Guild) getRemote(ctx context.Context) (*RemoteGuild, error) {
 }
 
 func (g *Guild) stop(ctx context.Context) error {
-	track := g.getTrack()
-	oldcurr := track.getRemote()
+	oldcurr := g.track.getRemote()
 
-	track.setRemote(nil)
-	track.cleanup()
+	g.track.setRemote(nil)
+	g.track.cleanup()
 
 	err := oldcurr.DeleteOrRequeue(ctx, g.store)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -421,7 +371,7 @@ func (g *Guild) stop(ctx context.Context) error {
 }
 
 func (g *Guild) connect(channelID string) error {
-	if channelID == "" || g.getTrack().getRemote() == nil {
+	if channelID == "" || g.track.getRemote() == nil {
 		if g.getVC() != nil {
 			g.vcMu.Lock()
 

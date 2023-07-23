@@ -164,15 +164,34 @@ func (s *Spotify) getTrackData(ctx context.Context, id spotify.ID) ([]extractor.
 	}, nil
 }
 
+func (s *Spotify) getAlbumTracksIter(ctx context.Context, id spotify.ID) ([]spotify.SimpleTrack, error) {
+	res := make([]spotify.SimpleTrack, 0)
+
+	for {
+		page, err := s.client.GetAlbumTracks(ctx, id, spotify.Limit(tracksItemsLimit), spotify.Offset(len(res)))
+		if err != nil {
+			return nil, errorx.Decorate(err, "get album tracks")
+		}
+
+		res = append(res, page.Tracks...)
+
+		if len(res) == page.Total {
+			break
+		}
+	}
+
+	return res, nil
+}
+
 func (s *Spotify) getAlbumTracksData(ctx context.Context, id spotify.ID) ([]extractor.TrackData, error) {
-	album, err := s.client.GetAlbum(ctx, id)
+	tracks, err := s.getAlbumTracksIter(ctx, id)
 	if err != nil {
 		return nil, errorx.Decorate(err, "get album")
 	}
 
-	res := make([]extractor.TrackData, len(album.Tracks.Tracks))
+	res := make([]extractor.TrackData, len(tracks))
 
-	for i, track := range album.Tracks.Tracks {
+	for i, track := range tracks {
 		title := getTrackTitle(track)
 
 		res[i] = extractor.TrackData{
