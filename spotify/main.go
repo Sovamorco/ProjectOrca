@@ -155,7 +155,7 @@ func (s *Spotify) getTrackData(ctx context.Context, id spotify.ID) ([]extractor.
 	return []extractor.TrackData{
 		{
 			Title:         title,
-			ExtractionURL: fmt.Sprintf("https://www.youtube.com/results?search_query=%s", title),
+			ExtractionURL: getExtractionURL(title),
 			DisplayURL:    getTrackDisplayURL(track.SimpleTrack),
 			StreamURL:     "",
 			Live:          false,
@@ -197,7 +197,7 @@ func (s *Spotify) getAlbumTracksData(ctx context.Context, id spotify.ID) ([]extr
 
 		res[i] = extractor.TrackData{
 			Title:         title,
-			ExtractionURL: fmt.Sprintf("ytsearch1:%s", title),
+			ExtractionURL: getExtractionURL(title),
 			DisplayURL:    getTrackDisplayURL(track),
 			StreamURL:     "",
 			Live:          false,
@@ -241,7 +241,7 @@ func (s *Spotify) getPlaylistTracksData(ctx context.Context, id spotify.ID) ([]e
 
 		res[i] = extractor.TrackData{
 			Title:         title,
-			ExtractionURL: fmt.Sprintf("ytsearch1:%s", title),
+			ExtractionURL: getExtractionURL(title),
 			DisplayURL:    getTrackDisplayURL(track.Track.Track.SimpleTrack),
 			StreamURL:     "",
 			Live:          false,
@@ -273,4 +273,8 @@ func getTrackDisplayURL(track spotify.SimpleTrack) string {
 	}
 
 	return track.Endpoint
+}
+
+func getExtractionURL(title string) string {
+	return fmt.Sprintf("https://www.youtube.com/results?search_query=%s", title)
 }
