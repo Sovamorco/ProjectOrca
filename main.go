@@ -990,7 +990,7 @@ func (o *orcaServer) sendResyncSeek(
 }
 
 func (o *orcaServer) handleKeyDel(ctx context.Context, logger *zap.SugaredLogger, msg *redis.Message) error {
-	logger.Infof("Lock for %s expired, taking over", msg.Payload)
+	logger.Infof("Lock for %s expired, trying takeover", msg.Payload)
 
 	err := o.initFromStore(ctx)
 	if err != nil {
