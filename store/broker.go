@@ -13,7 +13,7 @@ type MessageHandler func(context.Context, *zap.SugaredLogger, *redis.Message) er
 func (s *Store) Subscribe(ctx context.Context, mh MessageHandler, channels ...string) {
 	ps := s.Client.Subscribe(ctx, channels...)
 
-	s.unsubFuncs = append(s.unsubFuncs, func(ctx context.Context) {
+	s.shutdownFuncs = append(s.shutdownFuncs, func(ctx context.Context) {
 		err := ps.Unsubscribe(ctx, channels...)
 		if err != nil {
 			s.logger.Errorf("Error unsubscribing from channels: %+v", err)

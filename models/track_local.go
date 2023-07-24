@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"sync"
 	"time"
@@ -15,6 +16,14 @@ import (
 	"ProjectOrca/store"
 	"github.com/joomcode/errorx"
 	"go.uber.org/zap"
+)
+
+const (
+	cmdWaitTimeout = 5 * time.Second
+)
+
+var (
+	ErrCMDStuck = errors.New("command stuck")
 )
 
 type LocalTrack struct {
@@ -154,26 +163,34 @@ func (t *LocalTrack) startStream(remote *RemoteTrack) error {
 func (t *LocalTrack) cleanup() {
 	if cmd := t.getCMD(); cmd != nil {
 		err := cmd.Process.Kill()
-		if err != nil {
+		if err != nil && !errors.Is(err, os.ErrProcessDone) {
 			t.logger.Errorf("Error killing current process: %+v", err)
 		}
 	}
 
 	if stream := t.getStream(); stream != nil {
 		err := stream.Close()
-		if err != nil {
+		if err != nil && !errors.Is(err, os.ErrClosed) {
 			t.logger.Errorf("Error closing current stream: %+v", err)
 		}
 	}
 
 	t.setCMD(nil)
 	t.setStream(nil)
-	t.setPos(0)
+	t.setPos(0) // resets local track position proxy, NOT remote track position
 }
 
 func (t *LocalTrack) getPacket(packet []byte) error {
 	n, err := io.ReadFull(t.getStream(), packet)
 	if err != nil {
+		if errors.Is(err, io.EOF) {
+			// additionally wait for ffmpeg to exit because we need exit code
+			err := t.waitForCMDExit()
+			if err != nil {
+				return errorx.Decorate(err, "wait for ffmpeg")
+			}
+		}
+
 		if !errors.Is(err, io.ErrUnexpectedEOF) {
 			return errorx.Decorate(err, "read audio Stream")
 		}
@@ -185,4 +202,30 @@ func (t *LocalTrack) getPacket(packet []byte) error {
 	}
 
 	return nil
+}
+
+func (t *LocalTrack) waitForCMDExit() error {
+	ec := make(chan error, 1)
+
+	go func() {
+		ec <- t.getCMD().Wait()
+	}()
+
+	select {
+	case err := <-ec:
+		if err != nil {
+			return errorx.Decorate(err, "wait for cmd exit")
+		}
+
+		return nil
+	case <-time.After(cmdWaitTimeout):
+	}
+
+	// waiting timed out
+	err := t.getCMD().Process.Kill()
+	if err != nil {
+		return errorx.Decorate(err, "kill cmd")
+	}
+
+	return ErrCMDStuck
 }

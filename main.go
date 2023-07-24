@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/go-redsync/redsync/v4"
 	"math/rand"
 	"net"
 	"os"
@@ -42,10 +43,6 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-type DeathrattleMessage struct {
-	Deceased string `json:"deceased"`
-}
-
 type ResyncTarget int
 
 type ResyncMessage struct {
@@ -57,22 +54,13 @@ type ResyncMessage struct {
 	SeekPos time.Duration `json:"seek_pos"`
 }
 
-type ExistenceMessage struct {
-	Sender string `json:"sender"`
-}
-
 const (
-	MigrationsTimeout   = time.Second * 300
-	DeathrattlesChannel = "deathrattles"
-	ResyncsChannel      = "resync"
-	ExistenceChannel    = "existence"
+	MigrationsTimeout = time.Second * 300
+	ResyncsChannel    = "resync"
 
 	edgeOrdKeyDiff    = 100
 	defaultPrevOrdKey = 0
 	defaultNextOrdKey = defaultPrevOrdKey + edgeOrdKeyDiff
-
-	existenceFrequency = 30 * time.Second
-	existenceTimeout   = existenceFrequency + 10*time.Second
 )
 
 // resync targets.
@@ -84,7 +72,6 @@ const (
 var (
 	ErrFailedToAuthenticate = status.Error(codes.Unauthenticated, "failed to authenticate bot")
 	ErrInternal             = status.Error(codes.Internal, "internal error")
-	ErrInvalidValue         = errors.New("invalid value")
 )
 
 type orcaServer struct {
@@ -99,10 +86,6 @@ type orcaServer struct {
 	// changeable values with locks
 	states   []*models.Bot
 	statesMu sync.RWMutex `exhaustruct:"optional"`
-
-	// concurrency-safe
-	existenceStatus   sync.Map
-	existenceLoopStop chan struct{}
 }
 
 func newOrcaServer(logger *zap.SugaredLogger, st *store.Store) *orcaServer {
@@ -115,57 +98,47 @@ func newOrcaServer(logger *zap.SugaredLogger, st *store.Store) *orcaServer {
 		extractors: extractor.NewExtractors(),
 
 		states: make([]*models.Bot, 0),
-
-		existenceStatus:   sync.Map{},
-		existenceLoopStop: make(chan struct{}, 1),
 	}
 }
 
 func (o *orcaServer) gracefulShutdown(ctx context.Context) {
-	// make sure this does not block
-	select {
-	case o.existenceLoopStop <- struct{}{}:
-	default:
-	}
-
 	o.statesMu.RLock()
 	for _, state := range o.states {
 		state.GracefulShutdown()
 	}
 	o.statesMu.RUnlock()
 
-	_, err := o.store.
-		NewUpdate().
-		Model((*models.RemoteBot)(nil)).
-		Where("locker = ?", o.id).
-		Set("locker = NULL").
-		Exec(ctx)
-	if err != nil {
-		o.logger.Errorf("Error unlocking bots: %+v", err)
-	}
-
 	o.store.Unsubscribe(ctx)
-
-	o.sendDeathrattle(ctx)
 
 	o.store.GracefulShutdown()
 }
 
 func (o *orcaServer) initFromStore(ctx context.Context) error {
-	var unlocked []*models.RemoteBot
+	var bots []*models.RemoteBot
 
 	err := o.store.
-		NewUpdate().
-		Model(&unlocked).
-		Where("locker IS NULL").
-		Set("locker = ?", o.id).
-		Returning("*").
+		NewSelect().
+		Model(&bots).
+		Column("id", "token").
 		Scan(ctx)
 	if err != nil {
-		return errorx.Decorate(err, "lock states")
+		return errorx.Decorate(err, "select bots")
 	}
 
-	for _, state := range unlocked {
+	for _, state := range bots {
+		err = o.store.Lock(ctx, state.ID)
+		if err != nil {
+			var et *redsync.ErrTaken
+
+			if !errors.As(err, &et) {
+				o.logger.Errorf("Error locking state: %+v", err)
+			}
+
+			continue
+		}
+
+		o.logger.Infof("Locked state %s", state.ID)
+
 		if s := o.getStateByToken(state.Token); s != nil {
 			// state already controlled, no need to init
 			continue
@@ -303,7 +276,7 @@ func (o *orcaServer) register(ctx context.Context, token string) (*models.Remote
 		return nil, errorx.Decorate(err, "create local bot state")
 	}
 
-	r := models.NewRemoteBot(state.GetID(), state.GetToken(), o.id)
+	r := models.NewRemoteBot(state.GetID(), state.GetToken())
 
 	_, err = o.store.
 		NewInsert().
@@ -834,6 +807,14 @@ func doMigrate(ctx context.Context, logger *zap.SugaredLogger, db *bun.DB) error
 }
 
 func run(ctx context.Context, logger *zap.SugaredLogger) error { //nolint:funlen,cyclop // FIXME
+	redisConfig := store.RedisConfig{
+		Host:     "127.0.0.1",
+		Port:     6379, //nolint:gomnd // TODO: proper config
+		Username: "orca",
+		Password: "local",
+		DB:       0,
+	}
+
 	st := store.NewStore(logger, &store.Config{
 		DB: store.DBConfig{
 			Host:     "127.0.0.1",
@@ -843,12 +824,7 @@ func run(ctx context.Context, logger *zap.SugaredLogger) error { //nolint:funlen
 			DB:       "orca",
 			SSL:      false,
 		},
-		Broker: store.RedisConfig{
-			Host:  "127.0.0.1",
-			Port:  6379, //nolint:gomnd // TODO: proper config
-			Token: "local",
-			DB:    0,
-		},
+		Broker: redisConfig,
 	})
 
 	err := doMigrate(ctx, logger, st.DB)
@@ -900,11 +876,11 @@ func run(ctx context.Context, logger *zap.SugaredLogger) error { //nolint:funlen
 
 	orca.extractors.AddExtractor(s)
 
-	orca.store.Subscribe(ctx, orca.handleDeathrattle, DeathrattlesChannel)
 	orca.store.Subscribe(ctx, orca.handleResync, ResyncsChannel)
-	orca.store.Subscribe(ctx, orca.handleExistence, ExistenceChannel)
-
-	go orca.existenceLoop(ctx)
+	orca.store.Subscribe(ctx, orca.handleKeyDel,
+		fmt.Sprintf("__keyevent@%d__:del", redisConfig.DB),
+		fmt.Sprintf("__keyevent@%d__:expired", redisConfig.DB),
+	)
 
 	err = orca.initFromStore(ctx)
 	if err != nil {
@@ -936,42 +912,6 @@ func run(ctx context.Context, logger *zap.SugaredLogger) error { //nolint:funlen
 		logger.Infof("Exiting with signal %v", sig)
 
 		return nil
-	}
-}
-
-func (o *orcaServer) handleDeathrattle(ctx context.Context, logger *zap.SugaredLogger, msg *redis.Message) error {
-	dm := new(DeathrattleMessage)
-
-	err := json.Unmarshal([]byte(msg.Payload), dm)
-	if err != nil {
-		return errorx.Decorate(err, "unmarshal deathrattle")
-	}
-
-	logger.Infof("Handling deathrattle from %s", dm.Deceased)
-
-	o.existenceStatus.Delete(dm.Deceased)
-
-	err = o.initFromStore(ctx)
-	if err != nil {
-		return errorx.Decorate(err, "init after deathrattle")
-	}
-
-	return nil
-}
-
-func (o *orcaServer) sendDeathrattle(ctx context.Context) {
-	b, err := json.Marshal(DeathrattleMessage{
-		Deceased: o.id,
-	})
-	if err != nil {
-		o.logger.Errorf("Error marshalling deathrattle: %+v", err)
-
-		return
-	}
-
-	err = o.store.Publish(ctx, DeathrattlesChannel, b).Err()
-	if err != nil {
-		o.logger.Errorf("Error publishing deathrattle: %+v", err)
 	}
 }
 
@@ -1049,110 +989,15 @@ func (o *orcaServer) sendResyncSeek(
 	return nil
 }
 
-func (o *orcaServer) handleExistence(ctx context.Context, logger *zap.SugaredLogger, msg *redis.Message) error {
-	h := new(ExistenceMessage)
+func (o *orcaServer) handleKeyDel(ctx context.Context, logger *zap.SugaredLogger, msg *redis.Message) error {
+	logger.Infof("Lock for %s expired, taking over", msg.Payload)
 
-	err := json.Unmarshal([]byte(msg.Payload), h)
-	if err != nil {
-		return errorx.Decorate(err, "unmarshal existence")
-	}
-
-	if h.Sender == o.id {
-		return nil
-	}
-
-	newCancel := make(chan struct{}, 1)
-
-	cI, ok := o.existenceStatus.Swap(h.Sender, newCancel)
-	if ok {
-		cancel, ok := cI.(chan struct{})
-		if !ok {
-			return ErrInvalidValue
-		}
-
-		// cancel previous existence timeout, make sure it does not block
-		select {
-		case cancel <- struct{}{}:
-		default:
-		}
-	} else {
-		// new sender - announce our existence regardless of loop status
-		err = o.sendExistenceMessage(ctx)
-		if err != nil {
-			return errorx.Decorate(err, "send existence message")
-		}
-	}
-
-	err = o.waitForExistence(ctx, logger, h.Sender, newCancel)
-	if err != nil {
-		return errorx.Decorate(err, "wait for existence")
-	}
-
-	return nil
-}
-
-func (o *orcaServer) waitForExistence(
-	ctx context.Context, logger *zap.SugaredLogger, sender string, cancel chan struct{},
-) error {
-	select {
-	case <-cancel:
-		return nil
-	case <-time.After(existenceTimeout):
-	}
-
-	logger.Debugf("%s did not verify their existence, taking over", sender)
-
-	_, err := o.store.NewUpdate().
-		Model((*models.RemoteBot)(nil)).
-		Set("locker = NULL").
-		Where("locker = ?", sender).
-		Exec(ctx)
-	if err != nil {
-		return errorx.Decorate(err, "unlock bots")
-	}
-
-	err = o.initFromStore(ctx)
+	err := o.initFromStore(ctx)
 	if err != nil {
 		return errorx.Decorate(err, "init after takeover")
 	}
 
 	return nil
-}
-
-func (o *orcaServer) sendExistenceMessage(ctx context.Context) error {
-	res := ExistenceMessage{
-		Sender: o.id,
-	}
-
-	b, err := json.Marshal(res)
-	if err != nil {
-		return errorx.Decorate(err, "marshal")
-	}
-
-	err = o.store.Publish(ctx, ExistenceChannel, b).Err()
-	if err != nil {
-		return errorx.Decorate(err, "publish")
-	}
-
-	return nil
-}
-
-func (o *orcaServer) existenceLoop(ctx context.Context) {
-	ticker := time.NewTicker(existenceFrequency)
-	defer ticker.Stop()
-
-	for {
-		err := o.sendExistenceMessage(ctx)
-		if err != nil {
-			o.logger.Errorf("Error sending existence message: %+v", err)
-		}
-
-		select {
-		case <-o.existenceLoopStop:
-			return
-		case <-ticker.C:
-		}
-	}
 }
 
 func (o *orcaServer) chooseOrdKeyRange(ctx context.Context, qlen, position int) (float64, float64, bool) {

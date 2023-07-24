@@ -7,15 +7,13 @@ import (
 type RemoteBot struct {
 	bun.BaseModel `bun:"table:bots" exhaustruct:"optional"`
 
-	ID     string `bun:",pk"`
-	Token  string
-	Locker string
+	ID    string `bun:",pk"`
+	Token string
 }
 
-func NewRemoteBot(id, token, locker string) *RemoteBot {
+func NewRemoteBot(id, token string) *RemoteBot {
 	return &RemoteBot{
-		ID:     id,
-		Token:  token,
-		Locker: locker,
+		ID:    id,
+		Token: token,
 	}
 }

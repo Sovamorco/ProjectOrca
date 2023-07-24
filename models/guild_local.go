@@ -216,6 +216,18 @@ func (g *Guild) playLoop(ctx context.Context) { //nolint:cyclop // FIXME
 			}
 
 			g.logger.Errorf("Error getting packet from stream: %+v", err)
+
+			_, err = g.store.
+				NewUpdate().
+				Model(g.track.getRemote()).
+				Set("stream_url = ?", "").
+				WherePK().
+				Exec(ctx)
+			if err != nil {
+				g.logger.Errorf("Error resetting stream url: %+v", err)
+			}
+
+			g.track.setRemote(nil)
 			g.track.cleanup()
 
 			continue
