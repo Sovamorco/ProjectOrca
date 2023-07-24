@@ -28,7 +28,7 @@ type Extractor interface {
 	ExtractTracksData(context.Context, string) ([]TrackData, error)
 
 	ExtractionURLMatches(context.Context, string) bool
-	ExtractStreamURL(context.Context, string) (string, error)
+	ExtractStreamURL(context.Context, string) (string, time.Duration, error)
 }
 
 type Extractors struct {
@@ -60,17 +60,17 @@ func (e *Extractors) ExtractTracksData(ctx context.Context, url string) ([]Track
 	return nil, ErrNoExtractor
 }
 
-func (e *Extractors) ExtractStreamURL(ctx context.Context, extURL string) (string, error) {
+func (e *Extractors) ExtractStreamURL(ctx context.Context, extURL string) (string, time.Duration, error) {
 	for _, extractor := range e.extractors {
 		if extractor.ExtractionURLMatches(ctx, extURL) {
-			s, err := extractor.ExtractStreamURL(ctx, extURL)
+			s, dur, err := extractor.ExtractStreamURL(ctx, extURL)
 			if err != nil {
-				return "", errorx.Decorate(err, "extract stream url")
+				return "", 0, errorx.Decorate(err, "extract stream url")
 			}
 
-			return s, nil
+			return s, dur, nil
 		}
 	}
 
-	return "", ErrNoExtractor
+	return "", 0, ErrNoExtractor
 }

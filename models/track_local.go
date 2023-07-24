@@ -88,14 +88,15 @@ func (t *LocalTrack) initialize(ctx context.Context) error {
 }
 
 func (t *LocalTrack) setStreamURL(ctx context.Context, remote *RemoteTrack) error {
-	url, err := t.extractors.ExtractStreamURL(ctx, remote.ExtractionURL)
+	url, dur, err := t.extractors.ExtractStreamURL(ctx, remote.ExtractionURL)
 	if err != nil {
 		return errorx.Decorate(err, "extract stream url")
 	}
 
 	remote.StreamURL = url
+	remote.Duration = dur
 
-	_, err = t.store.NewUpdate().Model(remote).Column("stream_url").WherePK().Exec(ctx)
+	_, err = t.store.NewUpdate().Model(remote).Column("stream_url", "duration").WherePK().Exec(ctx)
 	if err != nil {
 		return errorx.Decorate(err, "store url")
 	}

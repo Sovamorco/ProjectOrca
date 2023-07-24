@@ -295,6 +295,11 @@ func (g *Guild) playLoopPreconditions(ctx context.Context) (bool, error) { //nol
 		if err != nil {
 			g.logger.Errorf("Error initializing track: %+v", err)
 
+			err = g.track.getRemote().Delete(ctx, g.store)
+			if err != nil {
+				g.logger.Errorf("Error deleting broken track: %+v", err)
+			}
+
 			g.track.setRemote(nil)
 
 			return false, nil

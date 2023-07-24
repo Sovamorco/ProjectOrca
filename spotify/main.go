@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"ProjectOrca/extractor"
 	"ProjectOrca/utils"
@@ -110,8 +111,8 @@ func (s *Spotify) ExtractionURLMatches(_ context.Context, _ string) bool {
 	return false
 }
 
-func (s *Spotify) ExtractStreamURL(_ context.Context, _ string) (string, error) {
-	return "", ErrCannotExtractStreamURL
+func (s *Spotify) ExtractStreamURL(_ context.Context, _ string) (string, time.Duration, error) {
+	return "", 0, ErrCannotExtractStreamURL
 }
 
 func (s *Spotify) refreshToken(ctx context.Context) error {
@@ -154,7 +155,7 @@ func (s *Spotify) getTrackData(ctx context.Context, id spotify.ID) ([]extractor.
 	return []extractor.TrackData{
 		{
 			Title:         title,
-			ExtractionURL: fmt.Sprintf("ytsearch1:%s", title),
+			ExtractionURL: fmt.Sprintf("https://www.youtube.com/results?search_query=%s", title),
 			DisplayURL:    getTrackDisplayURL(track.SimpleTrack),
 			StreamURL:     "",
 			Live:          false,

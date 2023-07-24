@@ -110,7 +110,7 @@ func (o *orcaServer) gracefulShutdown(ctx context.Context) {
 
 	o.store.Unsubscribe(ctx)
 
-	o.store.GracefulShutdown()
+	o.store.GracefulShutdown(ctx)
 }
 
 func (o *orcaServer) initFromStore(ctx context.Context) error {

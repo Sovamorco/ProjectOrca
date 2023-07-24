@@ -77,9 +77,10 @@ func (r *RedisConfig) getOptions() *redis.Options {
 type Store struct {
 	*bun.DB
 	*redis.Client
-	logger        *zap.SugaredLogger
-	shutdownFuncs []func(ctx context.Context)
-	rs            *redsync.Redsync
+	logger           *zap.SugaredLogger
+	shutdownFuncs    []func(ctx context.Context)
+	unsubscribeFuncs []func(ctx context.Context)
+	rs               *redsync.Redsync
 }
 
 func NewStore(logger *zap.SugaredLogger, config *Config) *Store {
@@ -90,15 +91,18 @@ func NewStore(logger *zap.SugaredLogger, config *Config) *Store {
 	pool := goredis.NewPool(client)
 
 	return &Store{
-		logger:        logger.Named("store"),
-		DB:            db,
-		Client:        client,
-		shutdownFuncs: make([]func(ctx context.Context), 0),
-		rs:            redsync.New(pool),
+		logger:           logger.Named("store"),
+		DB:               db,
+		Client:           client,
+		shutdownFuncs:    make([]func(ctx context.Context), 0),
+		unsubscribeFuncs: make([]func(ctx context.Context), 0),
+		rs:               redsync.New(pool),
 	}
 }
 
-func (s *Store) GracefulShutdown() {
+func (s *Store) GracefulShutdown(ctx context.Context) {
+	s.doShutdownFuncs(ctx)
+
 	err := s.DB.Close()
 	if err != nil {
 		s.logger.Errorf("Error closing bun store: %+v", err)
@@ -111,6 +115,23 @@ func (s *Store) GracefulShutdown() {
 }
 
 func (s *Store) Unsubscribe(ctx context.Context) {
+	var wg sync.WaitGroup
+
+	for _, f := range s.unsubscribeFuncs {
+		f := f
+
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+			f(ctx)
+		}()
+	}
+
+	wg.Wait()
+}
+
+func (s *Store) doShutdownFuncs(ctx context.Context) {
 	var wg sync.WaitGroup
 
 	for _, f := range s.shutdownFuncs {

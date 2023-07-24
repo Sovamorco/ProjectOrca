@@ -3,6 +3,7 @@ package ytdl
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os/exec"
 	"strings"
@@ -13,6 +14,10 @@ import (
 
 	"github.com/joomcode/errorx"
 	"go.uber.org/zap"
+)
+
+var (
+	ErrInvalidOutput = errors.New("yt-dlp produced invalid output")
 )
 
 type TrackData struct {
@@ -81,13 +86,26 @@ func (y *YTDL) ExtractionURLMatches(_ context.Context, extURL string) bool {
 	return strings.HasPrefix(extURL, "ytsearch") || utils.URLRx.MatchString(extURL)
 }
 
-func (y *YTDL) ExtractStreamURL(_ context.Context, extURL string) (string, error) {
-	urlB, err := y.getYTDLPOutput("--get-url", extURL)
+func (y *YTDL) ExtractStreamURL(_ context.Context, extURL string) (string, time.Duration, error) {
+	urlB, err := y.getYTDLPOutput("-I", "1:1", "-O", "url,duration", extURL)
 	if err != nil {
-		return "", errorx.Decorate(err, "get stream url")
+		return "", 0, errorx.Decorate(err, "get stream url")
 	}
 
-	return strings.TrimSpace(string(urlB)), nil
+	spl := strings.Split(string(urlB), "\n")
+	if len(spl) < 2 {
+		return "", 0, ErrInvalidOutput
+	}
+
+	url := spl[0]
+	durationS := spl[1]
+
+	duration, err := time.ParseDuration(durationS + "s")
+	if err != nil {
+		return "", 0, errorx.Decorate(err, "parse duration")
+	}
+
+	return url, duration, nil
 }
 
 func (y *YTDL) getTracksData(query string) ([]TrackData, error) {
