@@ -4,13 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net"
 	"sync"
 
-	_ "github.com/go-sql-driver/mysql" // driver required for sql connection
-	"github.com/joomcode/errorx"
+	"github.com/uptrace/bun/dialect/pgdialect"
+	"github.com/uptrace/bun/driver/pgdriver"
+
 	"github.com/redis/go-redis/v9"
 	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/mysqldialect"
 	"go.uber.org/zap"
 )
 
@@ -25,10 +26,23 @@ type DBConfig struct {
 	User     string `json:"user"`
 	Password string `json:"password"`
 	DB       string `json:"db"`
+	SSL      bool   `json:"ssl"`
 }
 
 func (s *DBConfig) getConnString() string {
-	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s", s.User, s.Password, s.Host, s.Port, s.DB)
+	sslmode := "disable"
+	if s.SSL {
+		sslmode = "enable"
+	}
+
+	return fmt.Sprintf(
+		"postgres://%s:%s@%s/%s?sslmode=%s",
+		s.User,
+		s.Password,
+		net.JoinHostPort(s.Host, fmt.Sprint(s.Port)),
+		s.DB,
+		sslmode,
+	)
 }
 
 type RedisConfig struct {
@@ -53,13 +67,10 @@ type Store struct {
 	unsubFuncs []func(ctx context.Context)
 }
 
-func NewStore(logger *zap.SugaredLogger, config *Config) (*Store, error) {
-	mysql, err := sql.Open("mysql", config.DB.getConnString())
-	if err != nil {
-		return nil, errorx.Decorate(err, "open sql connection")
-	}
+func NewStore(logger *zap.SugaredLogger, config *Config) *Store {
+	sqldb := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(config.DB.getConnString())))
+	db := bun.NewDB(sqldb, pgdialect.New())
 
-	db := bun.NewDB(mysql, mysqldialect.New())
 	client := redis.NewClient(config.Broker.getOptions())
 
 	return &Store{
@@ -67,7 +78,7 @@ func NewStore(logger *zap.SugaredLogger, config *Config) (*Store, error) {
 		DB:         db,
 		Client:     client,
 		unsubFuncs: make([]func(ctx context.Context), 0),
-	}, nil
+	}
 }
 
 func (s *Store) GracefulShutdown() {

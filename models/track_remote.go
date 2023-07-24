@@ -97,7 +97,6 @@ func (t *RemoteTrack) Requeue(ctx context.Context, store *store.Store) error {
 	_, err := store.
 		NewUpdate().
 		Model(t).
-		ModelTableExpr("tracks").
 		TableExpr(
 			"(?) AS last",
 			store.
@@ -108,8 +107,8 @@ func (t *RemoteTrack) Requeue(ctx context.Context, store *store.Store) error {
 				Order("ord_key DESC").
 				Limit(1),
 		).
-		Set("tracks.ord_key = last.ord_key + ?, pos=0", RequeueOrdKeyDiff).
-		Where("tracks.id = ?", t.ID). // WherePK does not seem to response ModelTableExpr
+		Set("ord_key = last.ord_key + ?, pos=0", RequeueOrdKeyDiff).
+		WherePK().
 		Exec(ctx)
 	if err != nil {
 		return errorx.Decorate(err, "requeue track")

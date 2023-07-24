@@ -63,16 +63,14 @@ func (t *LocalTrack) initialize(ctx context.Context) error {
 
 	remote := t.getRemote()
 
-	err := t.setStreamURL(ctx, remote)
-	if err != nil {
-		if remote.StreamURL == "" {
+	if remote.StreamURL == "" {
+		err := t.setStreamURL(ctx, remote)
+		if err != nil {
 			return errorx.Decorate(err, "get stream url")
 		}
-
-		t.logger.Errorf("Error getting new stream URL, hoping old one works: %+v", err)
 	}
 
-	err = t.startStream(remote)
+	err := t.startStream(remote)
 	if err != nil {
 		return errorx.Decorate(err, "get stream")
 	}
