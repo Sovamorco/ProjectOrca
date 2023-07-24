@@ -16,9 +16,7 @@ import (
 	"go.uber.org/zap"
 )
 
-var (
-	ErrInvalidOutput = errors.New("yt-dlp produced invalid output")
-)
+var ErrInvalidOutput = errors.New("yt-dlp produced invalid output")
 
 type TrackData struct {
 	Title       string            `json:"title"`
@@ -93,7 +91,7 @@ func (y *YTDL) ExtractStreamURL(_ context.Context, extURL string) (string, time.
 	}
 
 	spl := strings.Split(string(urlB), "\n")
-	if len(spl) < 2 {
+	if len(spl) < 2 { //nolint:gomnd // 2 lines used later
 		return "", 0, ErrInvalidOutput
 	}
 

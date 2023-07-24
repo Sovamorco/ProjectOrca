@@ -22,9 +22,7 @@ const (
 	cmdWaitTimeout = 5 * time.Second
 )
 
-var (
-	ErrCMDStuck = errors.New("command stuck")
-)
+var ErrCMDStuck = errors.New("command stuck")
 
 type LocalTrack struct {
 	// constant values

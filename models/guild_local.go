@@ -183,7 +183,7 @@ func (g *Guild) getNextTrack(ctx context.Context) (*RemoteTrack, error) {
 	return &track, nil
 }
 
-func (g *Guild) playLoop(ctx context.Context) { //nolint:cyclop // FIXME
+func (g *Guild) playLoop(ctx context.Context) { //nolint:cyclop,funlen // FIXME
 	packet := make([]byte, packetSize)
 
 	for {

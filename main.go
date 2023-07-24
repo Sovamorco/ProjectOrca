@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/go-redsync/redsync/v4"
 	"math/rand"
 	"net"
 	"os"
@@ -16,6 +15,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/go-redsync/redsync/v4"
 
 	"ProjectOrca/extractor"
 	"ProjectOrca/spotify"

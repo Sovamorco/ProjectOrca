@@ -4,10 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"github.com/joomcode/errorx"
 	"net"
 	"sync"
 	"time"
+
+	"github.com/joomcode/errorx"
 
 	"github.com/go-redsync/redsync/v4/redis/goredis/v9"
 
