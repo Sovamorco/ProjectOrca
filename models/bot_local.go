@@ -21,9 +21,8 @@ type Bot struct {
 	extractors *extractor.Extractors
 	session    *discordgo.Session
 
-	// potentially changeable lockable values
-	guilds   map[string]*Guild
-	guildsMu sync.Mutex `exhaustruct:"optional"`
+	// concurrency-safe
+	guilds sync.Map
 }
 
 func NewBot(
@@ -34,7 +33,7 @@ func NewBot(
 		store:      store,
 		extractors: extractors,
 		session:    nil,
-		guilds:     make(map[string]*Guild),
+		guilds:     sync.Map{},
 	}
 
 	sess, err := startSession(token)
@@ -67,19 +66,19 @@ func startSession(token string) (*discordgo.Session, error) {
 func (b *Bot) GracefulShutdown() {
 	var wg sync.WaitGroup
 
-	b.guildsMu.Lock()
-	for _, guild := range b.guilds {
-		guild := guild
-
+	b.guilds.Range(func(_, value any) bool {
 		wg.Add(1)
 
 		go func() {
 			defer wg.Done()
 
+			guild, _ := value.(*Guild)
+
 			guild.gracefulShutdown()
 		}()
-	}
-	b.guildsMu.Unlock()
+
+		return true
+	})
 
 	wg.Wait()
 
@@ -190,14 +189,13 @@ func (b *Bot) ResyncGuildTrack(ctx context.Context, guildID string) {
 }
 
 func (b *Bot) getGuild(ctx context.Context, guildID string) *Guild {
-	b.guildsMu.Lock()
-	defer b.guildsMu.Unlock()
-
-	local, ok := b.guilds[guildID]
+	local, ok := b.guilds.Load(guildID)
 	if !ok {
 		local = NewGuild(ctx, guildID, b.GetID(), b.session, b.logger, b.store, b.extractors)
-		b.guilds[guildID] = local
+		b.guilds.Store(guildID, local)
 	}
 
-	return local
+	guild, _ := local.(*Guild)
+
+	return guild
 }

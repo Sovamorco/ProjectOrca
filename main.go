@@ -79,9 +79,8 @@ type orcaServer struct {
 	store      *store.Store
 	extractors *extractor.Extractors
 
-	// changeable values with locks
-	states   []*models.Bot
-	statesMu sync.RWMutex `exhaustruct:"optional"`
+	// concurrency-safe
+	states sync.Map
 }
 
 func newOrcaServer(logger *zap.SugaredLogger, st *store.Store) *orcaServer {
@@ -93,16 +92,18 @@ func newOrcaServer(logger *zap.SugaredLogger, st *store.Store) *orcaServer {
 		store:      st,
 		extractors: extractor.NewExtractors(),
 
-		states: make([]*models.Bot, 0),
+		states: sync.Map{},
 	}
 }
 
 func (o *orcaServer) gracefulShutdown(ctx context.Context) {
-	o.statesMu.RLock()
-	for _, state := range o.states {
+	o.states.Range(func(_, value any) bool {
+		state, _ := value.(*models.Bot)
+
 		state.GracefulShutdown()
-	}
-	o.statesMu.RUnlock()
+
+		return true
+	})
 
 	o.store.Unsubscribe(ctx)
 
@@ -145,9 +146,7 @@ func (o *orcaServer) initFromStore(ctx context.Context) error {
 			o.logger.Errorf("Could not create local state for remote state %s: %+v", state.ID, err)
 		}
 
-		o.statesMu.Lock()
-		o.states = append(o.states, localState)
-		o.statesMu.Unlock()
+		o.states.Store(localState.GetID(), localState)
 
 		go localState.FullResync(ctx)
 	}
@@ -156,30 +155,32 @@ func (o *orcaServer) initFromStore(ctx context.Context) error {
 }
 
 func (o *orcaServer) getStateByToken(token string) *models.Bot {
-	o.statesMu.RLock()
-	defer o.statesMu.RUnlock()
+	var res *models.Bot
 
-	for _, state := range o.states {
+	o.states.Range(func(_, value any) bool {
+		state, _ := value.(*models.Bot)
 		if state.GetToken() == token {
-			return state
-		}
-	}
+			res = state
 
-	return nil
+			return false
+		}
+
+		return true
+	})
+
+	return res
 }
 
 // do not use for authentication-related purposes.
 func (o *orcaServer) getStateByID(id string) *models.Bot {
-	o.statesMu.RLock()
-	defer o.statesMu.RUnlock()
-
-	for _, state := range o.states {
-		if state.GetID() == id {
-			return state
-		}
+	val, ok := o.states.Load(id)
+	if !ok {
+		return nil
 	}
 
-	return nil
+	state, _ := val.(*models.Bot)
+
+	return state
 }
 
 func (o *orcaServer) parseIncomingContext(ctx context.Context) (string, error) {
@@ -284,9 +285,7 @@ func (o *orcaServer) register(ctx context.Context, token string) (*models.Remote
 		return nil, errorx.Decorate(err, "store remote bot state")
 	}
 
-	o.statesMu.Lock()
-	o.states = append(o.states, state)
-	o.statesMu.Unlock()
+	o.states.Store(state.GetID(), state)
 
 	return r, nil
 }
