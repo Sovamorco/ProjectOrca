@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"io"
 	"sync"
 	"time"
 
@@ -27,13 +26,19 @@ const (
 	bufferMilliseconds = 1000 // also dynaudnorm (possibly) has its own buffer
 	bufferPackets      = bufferMilliseconds / frameSizeMs
 
-	storeInterval     = 1000 * time.Millisecond
-	maxStoreDeviation = 2000 * time.Millisecond
+	storeInterval = 1000 * time.Millisecond
 
 	playLoopSleep = 50 * time.Millisecond
 
 	opusSendTimeout = 1 * time.Second
+
+	cmdWaitTimeout = 5 * time.Second
 )
+
+type posMsg struct {
+	pos time.Duration
+	id  string
+}
 
 type Guild struct {
 	// constant values
@@ -43,7 +48,9 @@ type Guild struct {
 	logger     *zap.SugaredLogger
 	store      *store.Store
 	extractors *extractor.Extractors
-	track      *LocalTrack
+
+	// concurrency-safe
+	posChan chan posMsg
 
 	// signal channels
 	storeLoopDone chan struct{}
@@ -74,14 +81,15 @@ func NewGuild(
 		store:      store,
 		extractors: extractors,
 
+		posChan: make(chan posMsg, 1),
+
 		storeLoopDone: make(chan struct{}, 1),
 		playLoopDone:  make(chan struct{}, 1),
 		resync:        make(chan struct{}, 1),
 		resyncPlaying: make(chan struct{}, 1),
 		playing:       make(chan struct{}, 1),
 
-		vc:    nil,
-		track: NewLocalTrack(logger, store, extractors),
+		vc: nil,
 	}
 
 	go g.storeLoop(context.WithoutCancel(ctx))
@@ -133,26 +141,24 @@ func (g *Guild) storeLoop(ctx context.Context) {
 	defer ticker.Stop()
 
 	for {
-		if g.track.initialized() {
-			_, err := g.store.
-				NewUpdate().
-				Model((*RemoteTrack)(nil)).
-				ModelTableExpr("tracks").
-				TableExpr("(?) AS curr", CurrentTrackQuery(g.store, g.botID, g.id).Column("id")).
-				Set("pos = ?", g.track.getPos()).
-				Where("tracks.id = curr.id").
-				Where("NOT live").
-				Where("ABS(tracks.pos - ?) <= ?", g.track.getPos(), maxStoreDeviation).
-				Exec(ctx)
-			if err != nil {
-				g.logger.Errorf("Error storing track position: %+v", err)
-			}
-		}
-
 		select {
 		case <-g.storeLoopDone:
 			return
-		case <-ticker.C:
+		case pos := <-g.posChan:
+			// check if ticker passed
+			select {
+			case <-ticker.C:
+				_, err := g.store.
+					NewUpdate().
+					Model((*RemoteTrack)(nil)).
+					Set("pos = ?", pos.pos).
+					Where("id = ?", pos.id).
+					Exec(ctx)
+				if err != nil {
+					g.logger.Errorf("Error storing track position: %+v", err)
+				}
+			default:
+			}
 		}
 	}
 }
@@ -172,168 +178,115 @@ func (g *Guild) getNextTrack(ctx context.Context) (*RemoteTrack, error) {
 	return &track, nil
 }
 
-func (g *Guild) playLoop(ctx context.Context) { //nolint:cyclop,funlen // FIXME
-	packet := make([]byte, packetSize)
+func (g *Guild) playLoop(ctx context.Context) {
+	track := NewTrack(g)
+
+	var err error
 
 	for {
-		select {
-		case <-g.playLoopDone:
+		err = g.playLoopPreconditions(ctx, track)
+
+		switch {
+		case errors.Is(err, ErrShuttingDown):
 			return
-		default:
-		}
-
-		fulfilled, err := g.playLoopPreconditions(ctx)
-		if err != nil {
-			return // it should only ever return ErrShuttingDown, so just return
-		}
-
-		if !fulfilled {
+		case err != nil:
 			time.Sleep(playLoopSleep)
 
 			continue
 		}
 
-		err = g.track.getPacket(packet)
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				err = g.stop(ctx)
-				if err != nil {
-					g.logger.Errorf("Error stopping current track: %+v", err)
-				}
+		g.sendOnVC(track.packet)
 
-				continue
-			}
+		track.incrementPos()
+	}
+}
 
-			g.logger.Errorf("Error getting packet from stream: %+v", err)
+func (g *Guild) sendOnVC(packet []byte) {
+	g.vcMu.RLock()
+	defer g.vcMu.RUnlock()
 
-			_, err = g.store.
-				NewUpdate().
-				Model((*RemoteTrack)(nil)).
-				ModelTableExpr("tracks").
-				TableExpr("(?) AS curr", CurrentTrackQuery(g.store, g.botID, g.id).Column("id")).
-				Set("stream_url = ?", "").
-				Where("tracks.id = curr.id").
-				Exec(ctx)
-			if err != nil {
-				g.logger.Errorf("Error resetting stream url: %+v", err)
-			}
+	if g.vc == nil || !g.vc.Ready {
+		return
+	}
 
-			g.track.cleanup()
-
-			continue
-		}
-
-		g.vcMu.RLock()
-
-		if !g.vc.Ready {
-			g.vcMu.RUnlock()
-
-			continue
-		}
-
-		select {
-		case <-g.playLoopDone:
-			g.vcMu.RUnlock()
-
-			return
-		case g.vc.OpusSend <- packet:
-		case <-time.After(opusSendTimeout):
-		}
-
-		g.vcMu.RUnlock()
-
-		if g.track.initialized() {
-			g.track.setPos(g.track.getPos() + frameSizeMs*time.Millisecond)
-		}
+	select {
+	case g.vc.OpusSend <- packet:
+	case <-time.After(opusSendTimeout):
 	}
 }
 
 // playLoopPreconditions checks for all the preconditions for playing the track.
-func (g *Guild) playLoopPreconditions(ctx context.Context) (bool, error) { //nolint:cyclop // FIXME
+func (g *Guild) playLoopPreconditions(ctx context.Context, track *Track) error {
 	// if we need to resync playing - reset current playing track
 	select {
+	case <-g.playLoopDone:
+		track.clean()
+
+		return ErrShuttingDown
 	case <-g.resyncPlaying:
-		g.track.cleanup()
+		track.clean()
 	default:
 	}
 
-	if !g.track.initialized() {
-		next, err := g.checkForNextTrack(ctx)
+	err := track.nextTrackPrecondition(ctx)
+	if err != nil {
+		g.logger.Debugf("Failed next track precondition: %+v", err)
 
-		switch {
-		case errors.Is(err, ErrShuttingDown):
-			return false, ErrShuttingDown
-		case errors.Is(err, ErrNoTrack):
-			return false, nil
-		case err != nil:
-			g.logger.Errorf("Error checking for next track: %+v", err)
-
-			return false, nil
-		}
-
-		err = g.track.initialize(ctx, next)
-		if err != nil {
-			g.logger.Errorf("Error initializing track: %+v", err)
-
-			_, err = g.store.NewDelete().Model(next).WherePK().Exec(ctx)
-			if err != nil {
-				g.logger.Errorf("Error deleting broken track: %+v", err)
-			}
-
-			g.track.cleanup()
-
-			return false, nil
-		}
+		return err
 	}
 
-	if g.getVC() == nil {
-		err := g.checkForVC(ctx)
+	err = g.vcPrecondition(ctx)
+	if err != nil {
+		g.logger.Debugf("Failed vc precondition: %+v", err)
 
-		if errors.Is(err, ErrShuttingDown) { //nolint:gocritic // I swear if else here is better
-			return false, ErrShuttingDown
-		} else if errors.Is(err, ErrNoVC) {
-			return false, nil
-		} else if err != nil {
-			g.logger.Errorf("Error checking for voice connection: %+v", err)
+		return err
+	}
 
-			return false, nil
-		}
+	err = track.packetPrecondition(ctx)
+	if err != nil {
+		g.logger.Debugf("Failed packet precondition: %+v", err)
+
+		return err
 	}
 
 	// try to consume playing from itself to verify that the track is, indeed, playing
 	select {
 	case <-g.playLoopDone:
-		return false, ErrShuttingDown
+		return ErrShuttingDown
 	case g.playing <- <-g.playing:
 	}
 
-	return true, nil
+	return nil
 }
 
-func (g *Guild) checkForNextTrack(ctx context.Context) (*RemoteTrack, error) {
-	track, err := g.getNextTrack(ctx)
-	if err == nil {
-		return track, nil
+func (g *Guild) vcPrecondition(ctx context.Context) error {
+	if vc := g.getVC(); vc != nil {
+		if !vc.Ready {
+			err := vc.Disconnect()
+			if err != nil {
+				g.logger.Errorf("Failed to disconnect from broken channel")
+			}
+
+			return ErrNoVC
+		}
+
+		return nil
 	}
 
-	if !errors.Is(err, ErrEmptyQueue) {
-		return nil, errorx.Decorate(err, "get track from store")
+	err := g.checkForVC(ctx)
+
+	switch {
+	case errors.Is(err, ErrShuttingDown):
+		return err
+	case errors.Is(err, ErrNoVC):
+		return ErrNoVC
+	case err != nil:
+		g.logger.Errorf("Error checking for voice connection: %+v", err)
+
+		return ErrNoVC
 	}
 
-	err = g.connect(ctx, "")
-	if err != nil {
-		g.logger.Errorf("Error leaving voice channel: %+v", err)
-	}
-
-	// queue is empty right now
-	// wait for signal on resyncPlaying channel instead of polling database
-	select {
-	case <-g.playLoopDone:
-		return nil, ErrShuttingDown
-	case <-g.resyncPlaying:
-	}
-
-	return nil, ErrNoTrack
+	return nil
 }
 
 func (g *Guild) checkForVC(ctx context.Context) error {
@@ -376,17 +329,6 @@ func (g *Guild) getRemote(ctx context.Context) (*RemoteGuild, error) {
 	}
 
 	return &r, nil
-}
-
-func (g *Guild) stop(ctx context.Context) error {
-	g.track.cleanup()
-
-	err := DeleteOrRequeueCurrent(ctx, g.store, g.botID, g.id)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return errorx.Decorate(err, "delete or requeue track")
-	}
-
-	return nil
 }
 
 func (g *Guild) connect(ctx context.Context, channelID string) error {

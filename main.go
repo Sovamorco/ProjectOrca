@@ -448,7 +448,16 @@ func (o *orcaServer) Skip(ctx context.Context, in *pb.GuildOnlyRequest) (*emptyp
 
 	o.logger.Infof("Skipping track in guild %s", in.GuildID)
 
-	err = models.DeleteOrRequeueCurrent(ctx, o.store, bot.ID, guild.ID)
+	var current models.RemoteTrack
+
+	err = guild.CurrentTrackQuery(o.store).Scan(ctx, &current)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		o.logger.Errorf("Error getting current track: %+v", err)
+
+		return nil, ErrInternal
+	}
+
+	err = current.DeleteOrRequeue(ctx, o.store)
 	if err != nil {
 		o.logger.Errorf("Error deleting or requeuing current track: %+v", err)
 

@@ -3,73 +3,55 @@ package models
 import (
 	"bufio"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/joomcode/errorx"
 	"io"
 	"os"
 	"os/exec"
-	"sync"
 	"time"
-
-	"ProjectOrca/extractor"
-
-	"ProjectOrca/store"
-	"github.com/joomcode/errorx"
-	"go.uber.org/zap"
 )
 
-const (
-	cmdWaitTimeout = 5 * time.Second
-)
+// Track is basically a wrapper for values commonly passed together - remote track, command, stream, packet.
+// It is not concurrency-safe, should be used within one goroutine.
+type Track struct {
+	g *Guild
 
-var ErrCMDStuck = errors.New("command stuck")
-
-type LocalTrack struct {
-	// constant values
-	logger     *zap.SugaredLogger
-	store      *store.Store
-	extractors *extractor.Extractors
-
-	// potentially changeable lockable values
-	cmd      *exec.Cmd
-	cmdMu    sync.RWMutex `exhaustruct:"optional"`
-	stream   io.ReadCloser
-	streamMu sync.RWMutex `exhaustruct:"optional"`
-	pos      time.Duration
-	posMu    sync.RWMutex `exhaustruct:"optional"`
+	remote *RemoteTrack
+	cmd    *exec.Cmd
+	stream io.ReadCloser
+	packet []byte
 }
 
-func NewLocalTrack(logger *zap.SugaredLogger, store *store.Store, extractors *extractor.Extractors) *LocalTrack {
-	return &LocalTrack{
-		logger:     logger.Named("track"),
-		store:      store,
-		extractors: extractors,
-		cmd:        nil,
-		stream:     nil,
-		pos:        0,
+func NewTrack(guild *Guild) *Track {
+	return &Track{
+		g: guild,
+
+		remote: nil,
+		cmd:    nil,
+		stream: nil,
+		packet: make([]byte, packetSize),
 	}
 }
 
-func (t *LocalTrack) initialized() bool {
-	cmd := t.getCMD()
-	stream := t.getStream()
-
-	return cmd != nil && stream != nil
+func (t *Track) initialized() bool {
+	return t.remote != nil && t.cmd != nil && t.stream != nil
 }
 
-func (t *LocalTrack) initialize(ctx context.Context, remote *RemoteTrack) error {
+func (t *Track) initialize(ctx context.Context) error {
 	if t.initialized() {
 		return nil
 	}
 
-	if remote.StreamURL == "" {
-		err := t.setStreamURL(ctx, remote)
+	if t.remote.StreamURL == "" {
+		err := t.setStreamURL(ctx)
 		if err != nil {
 			return errorx.Decorate(err, "get stream url")
 		}
 	}
 
-	err := t.startStream(remote)
+	err := t.startStream()
 	if err != nil {
 		return errorx.Decorate(err, "get stream")
 	}
@@ -77,16 +59,16 @@ func (t *LocalTrack) initialize(ctx context.Context, remote *RemoteTrack) error 
 	return nil
 }
 
-func (t *LocalTrack) setStreamURL(ctx context.Context, remote *RemoteTrack) error {
-	url, dur, err := t.extractors.ExtractStreamURL(ctx, remote.ExtractionURL)
+func (t *Track) setStreamURL(ctx context.Context) error {
+	url, dur, err := t.g.extractors.ExtractStreamURL(ctx, t.remote.ExtractionURL)
 	if err != nil {
 		return errorx.Decorate(err, "extract stream url")
 	}
 
-	remote.StreamURL = url
-	remote.Duration = dur
+	t.remote.StreamURL = url
+	t.remote.Duration = dur
 
-	_, err = t.store.NewUpdate().Model(remote).Column("stream_url", "duration").WherePK().Exec(ctx)
+	_, err = t.g.store.NewUpdate().Model(t.remote).Column("stream_url", "duration").WherePK().Exec(ctx)
 	if err != nil {
 		return errorx.Decorate(err, "store url")
 	}
@@ -94,25 +76,23 @@ func (t *LocalTrack) setStreamURL(ctx context.Context, remote *RemoteTrack) erro
 	return nil
 }
 
-func (t *LocalTrack) startStream(remote *RemoteTrack) error {
-	t.setPos(remote.Pos)
-
+func (t *Track) startStream() error {
 	ffmpegArgs := []string{
-		"-headers", remote.getFormattedHeaders(),
+		"-headers", t.remote.getFormattedHeaders(),
 		"-reconnect", "1",
 		"-reconnect_streamed", "1",
 		"-reconnect_delay_max", "2",
 	}
 
-	if !remote.Live {
+	if !t.remote.Live {
 		ffmpegArgs = append(ffmpegArgs,
 			"-reconnect_at_eof", "1",
-			"-ss", fmt.Sprintf("%f", t.getPos().Seconds()),
+			"-ss", fmt.Sprintf("%f", t.remote.Pos.Seconds()),
 		)
 	}
 
 	ffmpegArgs = append(ffmpegArgs,
-		"-i", remote.StreamURL,
+		"-i", t.remote.StreamURL,
 		"-map", "0:a",
 		"-filter:a", "dynaudnorm=p=0.9:r=0.9",
 		"-acodec", "libopus",
@@ -126,7 +106,7 @@ func (t *LocalTrack) startStream(remote *RemoteTrack) error {
 
 	ffmpeg := exec.Command("ffmpeg", ffmpegArgs...)
 
-	t.logger.Debug(ffmpeg)
+	t.g.logger.Debug(ffmpeg)
 
 	stdout, err := ffmpeg.StdoutPipe()
 	if err != nil {
@@ -147,34 +127,34 @@ func (t *LocalTrack) startStream(remote *RemoteTrack) error {
 		return errorx.Decorate(err, "start ffmpeg process")
 	}
 
-	t.setCMD(ffmpeg)
-	t.setStream(buf)
+	t.cmd = ffmpeg
+	t.stream = buf
 
 	return nil
 }
 
-func (t *LocalTrack) cleanup() {
-	if cmd := t.getCMD(); cmd != nil {
-		err := cmd.Process.Kill()
+func (t *Track) clean() {
+	if t.cmd != nil {
+		err := t.cmd.Process.Kill()
 		if err != nil && !errors.Is(err, os.ErrProcessDone) {
-			t.logger.Errorf("Error killing current process: %+v", err)
+			t.g.logger.Errorf("Error killing current process: %+v", err)
 		}
 	}
 
-	if stream := t.getStream(); stream != nil {
-		err := stream.Close()
+	if t.stream != nil {
+		err := t.stream.Close()
 		if err != nil && !errors.Is(err, os.ErrClosed) {
-			t.logger.Errorf("Error closing current stream: %+v", err)
+			t.g.logger.Errorf("Error closing current stream: %+v", err)
 		}
 	}
 
-	t.setCMD(nil)
-	t.setStream(nil)
-	t.setPos(0) // resets local track position proxy, NOT remote track position
+	t.cmd = nil
+	t.remote = nil
+	t.stream = nil
 }
 
-func (t *LocalTrack) getPacket(packet []byte) error {
-	n, err := io.ReadFull(t.getStream(), packet)
+func (t *Track) getPacket() error {
+	n, err := io.ReadFull(t.stream, t.packet)
 	if err != nil {
 		if errors.Is(err, io.EOF) {
 			// additionally wait for ffmpeg to exit because we need exit code
@@ -189,19 +169,19 @@ func (t *LocalTrack) getPacket(packet []byte) error {
 		}
 
 		// fill rest of the packet with zeros
-		for i := n; i < len(packet); i++ {
-			packet[i] = 0
+		for i := n; i < len(t.packet); i++ {
+			t.packet[i] = 0
 		}
 	}
 
 	return nil
 }
 
-func (t *LocalTrack) waitForCMDExit() error {
+func (t *Track) waitForCMDExit() error {
 	ec := make(chan error, 1)
 
 	go func() {
-		ec <- t.getCMD().Wait()
+		ec <- t.cmd.Wait()
 	}()
 
 	select {
@@ -215,10 +195,135 @@ func (t *LocalTrack) waitForCMDExit() error {
 	}
 
 	// waiting timed out
-	err := t.getCMD().Process.Kill()
+	err := t.cmd.Process.Kill()
 	if err != nil {
 		return errorx.Decorate(err, "kill cmd")
 	}
 
 	return ErrCMDStuck
+}
+
+func (t *Track) stop(ctx context.Context) error {
+	old := t.remote
+
+	t.clean()
+
+	err := old.DeleteOrRequeue(ctx, t.g.store)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return errorx.Decorate(err, "delete or requeue track")
+	}
+
+	return nil
+}
+
+func (t *Track) checkForNextTrack(ctx context.Context) error {
+	if t.remote != nil {
+		return nil
+	}
+
+	next, err := t.g.getNextTrack(ctx)
+	if err == nil {
+		t.remote = next
+
+		return nil
+	}
+
+	if !errors.Is(err, ErrEmptyQueue) {
+		return errorx.Decorate(err, "get track from store")
+	}
+
+	err = t.g.connect(ctx, "")
+	if err != nil {
+		t.g.logger.Errorf("Error leaving voice channel: %+v", err)
+	}
+
+	// queue is empty right now
+	// wait for signal on resyncPlaying channel instead of polling database
+	select {
+	case <-t.g.playLoopDone:
+		return ErrShuttingDown
+	case <-t.g.resyncPlaying:
+	}
+
+	return ErrNoTrack
+}
+
+func (t *Track) nextTrackPrecondition(ctx context.Context) error {
+	if t.initialized() {
+		return nil
+	}
+
+	err := t.checkForNextTrack(ctx)
+
+	if errors.Is(err, ErrShuttingDown) || errors.Is(err, ErrNoTrack) {
+		return err
+	} else if err != nil {
+		t.g.logger.Errorf("Error checking for next track: %+v", err)
+
+		return ErrNoTrack
+	}
+
+	err = t.initialize(ctx)
+	if err != nil {
+		t.g.logger.Errorf("Error initializing track: %+v", err)
+
+		_, err = t.g.store.NewDelete().Model(t.remote).WherePK().Exec(ctx)
+		if err != nil {
+			t.g.logger.Errorf("Error deleting broken track: %+v", err)
+		}
+
+		t.clean()
+
+		return ErrNoTrack
+	}
+
+	return nil
+}
+
+func (t *Track) packetPrecondition(ctx context.Context) error {
+	err := t.getPacket()
+	if err == nil {
+		return nil
+	}
+
+	if errors.Is(err, io.EOF) {
+		err = t.stop(ctx)
+		if err != nil {
+			t.g.logger.Errorf("Error stopping current track: %+v", err)
+		}
+
+		t.clean()
+
+		return io.EOF
+	}
+
+	t.g.logger.Errorf("Error getting packet from stream: %+v", err)
+
+	_, err = t.g.store.
+		NewUpdate().
+		Model(t.remote).
+		Set("stream_url = ?", "").
+		WherePK().
+		Exec(ctx)
+	if err != nil {
+		t.g.logger.Errorf("Error resetting stream url: %+v", err)
+	}
+
+	t.clean()
+
+	return ErrBrokenStreamURL
+}
+
+func (t *Track) incrementPos() {
+	if !t.initialized() {
+		return
+	}
+
+	t.remote.Pos += frameSizeMs * time.Millisecond
+
+	// make sure this does not block
+	select {
+	case t.g.posChan <- posMsg{pos: t.remote.Pos, id: t.remote.ID}:
+	default:
+	}
 }

@@ -80,16 +80,11 @@ func (t *RemoteTrack) ToProto() *pb.TrackData {
 	}
 }
 
-func DeleteCurrent(ctx context.Context, store *store.Store, botID, guildID string) error {
-	return DeletePosition(ctx, store, botID, guildID, 0)
-}
-
-func DeletePosition(ctx context.Context, store *store.Store, botID, guildID string, position int) error {
-	_, err := store.NewDelete().
-		Model((*RemoteTrack)(nil)).
-		ModelTableExpr("tracks").
-		TableExpr("(?) AS target", PositionTrackQuery(store, position, botID, guildID).Column("id")).
-		Where("tracks.id = target.id").
+func (t *RemoteTrack) Delete(ctx context.Context, store *store.Store) error {
+	_, err := store.
+		NewDelete().
+		Model(t).
+		WherePK().
 		Exec(ctx)
 	if err != nil {
 		return errorx.Decorate(err, "delete track")
@@ -98,25 +93,22 @@ func DeletePosition(ctx context.Context, store *store.Store, botID, guildID stri
 	return nil
 }
 
-func RequeueCurrent(ctx context.Context, store *store.Store, botID, guildID string) error {
+func (t *RemoteTrack) Requeue(ctx context.Context, store *store.Store) error {
 	_, err := store.
 		NewUpdate().
-		Model((*RemoteTrack)(nil)).
-		ModelTableExpr("tracks").
-		TableExpr("(?) AS curr", CurrentTrackQuery(store, botID, guildID).Column("id")).
+		Model(t).
 		TableExpr(
 			"(?) AS last",
 			store.
 				NewSelect().
 				Model((*RemoteTrack)(nil)).
 				Column("ord_key").
-				Where("bot_id = ?", botID).
-				Where("guild_id = ?", guildID).
+				Where("bot_id = ? AND guild_id = ?", t.BotID, t.GuildID).
 				Order("ord_key DESC").
 				Limit(1),
 		).
 		Set("ord_key = last.ord_key + ?, pos=0", RequeueOrdKeyDiff).
-		Where("tracks.id = curr.id").
+		WherePK().
 		Exec(ctx)
 	if err != nil {
 		return errorx.Decorate(err, "requeue track")
@@ -125,11 +117,11 @@ func RequeueCurrent(ctx context.Context, store *store.Store, botID, guildID stri
 	return nil
 }
 
-func DeleteOrRequeueCurrent(ctx context.Context, store *store.Store, botID string, guildID string) error {
+func (t *RemoteTrack) DeleteOrRequeue(ctx context.Context, store *store.Store) error {
 	var g RemoteGuild
 
-	g.BotID = botID
-	g.ID = guildID
+	g.BotID = t.BotID
+	g.ID = t.GuildID
 
 	err := store.
 		NewSelect().
@@ -142,10 +134,10 @@ func DeleteOrRequeueCurrent(ctx context.Context, store *store.Store, botID strin
 	}
 
 	if g.Loop {
-		return RequeueCurrent(ctx, store, botID, guildID)
+		return t.Requeue(ctx, store)
 	}
 
-	return DeleteCurrent(ctx, store, botID, guildID)
+	return t.Delete(ctx, store)
 }
 
 func (t *RemoteTrack) getFormattedHeaders() string {
