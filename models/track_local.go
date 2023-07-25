@@ -35,9 +35,8 @@ type LocalTrack struct {
 	cmdMu    sync.RWMutex `exhaustruct:"optional"`
 	stream   io.ReadCloser
 	streamMu sync.RWMutex `exhaustruct:"optional"`
-	// pos is duplicated here to leave remote concurrency-safe
-	pos   time.Duration
-	posMu sync.RWMutex `exhaustruct:"optional"`
+	pos      time.Duration
+	posMu    sync.RWMutex `exhaustruct:"optional"`
 }
 
 func NewLocalTrack(logger *zap.SugaredLogger, store *store.Store, extractors *extractor.Extractors) *LocalTrack {
