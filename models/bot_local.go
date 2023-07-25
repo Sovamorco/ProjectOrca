@@ -3,7 +3,6 @@ package models
 import (
 	"context"
 	"sync"
-	"time"
 
 	"ProjectOrca/extractor"
 
@@ -110,7 +109,7 @@ func (b *Bot) FullResync(ctx context.Context) {
 func (b *Bot) resyncGuild(ctx context.Context, guild *RemoteGuild) error {
 	local := b.getGuild(ctx, guild.ID)
 
-	err := local.connect(guild.ChannelID)
+	err := local.connect(ctx, guild.ChannelID)
 	if err != nil {
 		return errorx.Decorate(err, "error connecting to voice channel")
 	}
@@ -185,9 +184,9 @@ func (b *Bot) ResyncGuilds(ctx context.Context) error {
 	return nil
 }
 
-func (b *Bot) ResyncGuildTrack(ctx context.Context, guildID string, seekPos time.Duration) {
+func (b *Bot) ResyncGuildTrack(ctx context.Context, guildID string) {
 	local := b.getGuild(ctx, guildID)
-	local.ResyncPlaying(seekPos)
+	local.ResyncPlaying()
 }
 
 func (b *Bot) getGuild(ctx context.Context, guildID string) *Guild {

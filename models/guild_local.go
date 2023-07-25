@@ -8,8 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"ProjectOrca/utils"
-
 	"ProjectOrca/extractor"
 
 	"ProjectOrca/store"
@@ -29,7 +27,8 @@ const (
 	bufferMilliseconds = 1000 // also dynaudnorm (possibly) has its own buffer
 	bufferPackets      = bufferMilliseconds / frameSizeMs
 
-	storeInterval = 1 * time.Second
+	storeInterval     = 1000 * time.Millisecond
+	maxStoreDeviation = 2000 * time.Millisecond
 
 	playLoopSleep = 50 * time.Millisecond
 
@@ -121,15 +120,7 @@ func (g *Guild) gracefulShutdown() {
 	}
 }
 
-func (g *Guild) ResyncPlaying(seekPos time.Duration) {
-	if seekPos != utils.MinDuration {
-		// make sure this does not block
-		select {
-		case g.track.seek <- seekPos:
-		default:
-		}
-	}
-
+func (g *Guild) ResyncPlaying() {
 	// make sure this does not block
 	select {
 	case g.resyncPlaying <- struct{}{}:
@@ -142,12 +133,16 @@ func (g *Guild) storeLoop(ctx context.Context) {
 	defer ticker.Stop()
 
 	for {
-		if remote, pos := g.track.getRemote(), g.track.getPos(); remote != nil {
+		if g.track.initialized() {
 			_, err := g.store.
 				NewUpdate().
-				Model(remote).
-				Set("pos = ?", pos).
-				WherePK().
+				Model((*RemoteTrack)(nil)).
+				ModelTableExpr("tracks").
+				TableExpr("(?) AS curr", CurrentTrackQuery(g.store, g.botID, g.id).Column("id")).
+				Set("pos = ?", g.track.getPos()).
+				Where("tracks.id = curr.id").
+				Where("NOT live").
+				Where("ABS(tracks.pos - ?) <= ?", g.track.getPos(), maxStoreDeviation).
 				Exec(ctx)
 			if err != nil {
 				g.logger.Errorf("Error storing track position: %+v", err)
@@ -165,13 +160,7 @@ func (g *Guild) storeLoop(ctx context.Context) {
 func (g *Guild) getNextTrack(ctx context.Context) (*RemoteTrack, error) {
 	var track RemoteTrack
 
-	err := g.store.
-		NewSelect().
-		Model(&track).
-		Where("bot_id = ? AND guild_id = ?", g.botID, g.id).
-		Order("ord_key").
-		Limit(1).
-		Scan(ctx)
+	err := CurrentTrackQuery(g.store, g.botID, g.id).Scan(ctx, &track)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrEmptyQueue
@@ -219,21 +208,28 @@ func (g *Guild) playLoop(ctx context.Context) { //nolint:cyclop,funlen // FIXME
 
 			_, err = g.store.
 				NewUpdate().
-				Model(g.track.getRemote()).
+				Model((*RemoteTrack)(nil)).
+				ModelTableExpr("tracks").
+				TableExpr("(?) AS curr", CurrentTrackQuery(g.store, g.botID, g.id).Column("id")).
 				Set("stream_url = ?", "").
-				WherePK().
+				Where("tracks.id = curr.id").
 				Exec(ctx)
 			if err != nil {
 				g.logger.Errorf("Error resetting stream url: %+v", err)
 			}
 
-			g.track.setRemote(nil)
 			g.track.cleanup()
 
 			continue
 		}
 
 		g.vcMu.RLock()
+
+		if !g.vc.Ready {
+			g.vcMu.RUnlock()
+
+			continue
+		}
 
 		select {
 		case <-g.playLoopDone:
@@ -246,7 +242,7 @@ func (g *Guild) playLoop(ctx context.Context) { //nolint:cyclop,funlen // FIXME
 
 		g.vcMu.RUnlock()
 
-		if remote := g.track.getRemote(); remote != nil && !remote.Live {
+		if g.track.initialized() {
 			g.track.setPos(g.track.getPos() + frameSizeMs*time.Millisecond)
 		}
 	}
@@ -257,20 +253,34 @@ func (g *Guild) playLoopPreconditions(ctx context.Context) (bool, error) { //nol
 	// if we need to resync playing - reset current playing track
 	select {
 	case <-g.resyncPlaying:
-		g.track.setRemote(nil)
 		g.track.cleanup()
 	default:
 	}
 
-	if g.track.getRemote() == nil {
-		err := g.checkForNextTrack(ctx)
+	if !g.track.initialized() {
+		next, err := g.checkForNextTrack(ctx)
 
-		if errors.Is(err, ErrShuttingDown) { //nolint:gocritic // I swear if else here is better
+		switch {
+		case errors.Is(err, ErrShuttingDown):
 			return false, ErrShuttingDown
-		} else if errors.Is(err, ErrNoTrack) {
+		case errors.Is(err, ErrNoTrack):
 			return false, nil
-		} else if err != nil {
+		case err != nil:
 			g.logger.Errorf("Error checking for next track: %+v", err)
+
+			return false, nil
+		}
+
+		err = g.track.initialize(ctx, next)
+		if err != nil {
+			g.logger.Errorf("Error initializing track: %+v", err)
+
+			_, err = g.store.NewDelete().Model(next).WherePK().Exec(ctx)
+			if err != nil {
+				g.logger.Errorf("Error deleting broken track: %+v", err)
+			}
+
+			g.track.cleanup()
 
 			return false, nil
 		}
@@ -290,22 +300,6 @@ func (g *Guild) playLoopPreconditions(ctx context.Context) (bool, error) { //nol
 		}
 	}
 
-	if !g.track.initialized() {
-		err := g.track.initialize(ctx)
-		if err != nil {
-			g.logger.Errorf("Error initializing track: %+v", err)
-
-			err = g.track.getRemote().Delete(ctx, g.store)
-			if err != nil {
-				g.logger.Errorf("Error deleting broken track: %+v", err)
-			}
-
-			g.track.setRemote(nil)
-
-			return false, nil
-		}
-	}
-
 	// try to consume playing from itself to verify that the track is, indeed, playing
 	select {
 	case <-g.playLoopDone:
@@ -316,19 +310,17 @@ func (g *Guild) playLoopPreconditions(ctx context.Context) (bool, error) { //nol
 	return true, nil
 }
 
-func (g *Guild) checkForNextTrack(ctx context.Context) error {
+func (g *Guild) checkForNextTrack(ctx context.Context) (*RemoteTrack, error) {
 	track, err := g.getNextTrack(ctx)
 	if err == nil {
-		g.track.setRemote(track)
-
-		return nil
+		return track, nil
 	}
 
 	if !errors.Is(err, ErrEmptyQueue) {
-		return errorx.Decorate(err, "get track from store")
+		return nil, errorx.Decorate(err, "get track from store")
 	}
 
-	err = g.connect("")
+	err = g.connect(ctx, "")
 	if err != nil {
 		g.logger.Errorf("Error leaving voice channel: %+v", err)
 	}
@@ -337,11 +329,11 @@ func (g *Guild) checkForNextTrack(ctx context.Context) error {
 	// wait for signal on resyncPlaying channel instead of polling database
 	select {
 	case <-g.playLoopDone:
-		return ErrShuttingDown
+		return nil, ErrShuttingDown
 	case <-g.resyncPlaying:
 	}
 
-	return ErrNoTrack
+	return nil, ErrNoTrack
 }
 
 func (g *Guild) checkForVC(ctx context.Context) error {
@@ -351,7 +343,7 @@ func (g *Guild) checkForVC(ctx context.Context) error {
 	}
 
 	if remote.ChannelID != "" {
-		err = g.connect(remote.ChannelID)
+		err = g.connect(ctx, remote.ChannelID)
 		if err != nil {
 			return errorx.Decorate(err, "connect to voice channel")
 		}
@@ -387,12 +379,9 @@ func (g *Guild) getRemote(ctx context.Context) (*RemoteGuild, error) {
 }
 
 func (g *Guild) stop(ctx context.Context) error {
-	oldcurr := g.track.getRemote()
-
-	g.track.setRemote(nil)
 	g.track.cleanup()
 
-	err := oldcurr.DeleteOrRequeue(ctx, g.store)
+	err := DeleteOrRequeueCurrent(ctx, g.store, g.botID, g.id)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return errorx.Decorate(err, "delete or requeue track")
 	}
@@ -400,8 +389,19 @@ func (g *Guild) stop(ctx context.Context) error {
 	return nil
 }
 
-func (g *Guild) connect(channelID string) error {
-	if channelID == "" || g.track.getRemote() == nil {
+func (g *Guild) connect(ctx context.Context, channelID string) error {
+	_, err := g.store.
+		NewUpdate().
+		Model((*RemoteGuild)(nil)).
+		Set("channel_id = ?", channelID).
+		Where("bot_id = ?", g.botID).
+		Where("id = ?", g.id).
+		Exec(ctx)
+	if err != nil {
+		return errorx.Decorate(err, "store channel id")
+	}
+
+	if channelID == "" {
 		if g.getVC() != nil {
 			g.vcMu.Lock()
 

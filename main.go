@@ -22,8 +22,6 @@ import (
 	"ProjectOrca/spotify"
 	"ProjectOrca/ytdl"
 
-	"ProjectOrca/utils"
-
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"ProjectOrca/migrations"
@@ -50,9 +48,6 @@ type ResyncMessage struct {
 	Bot     string         `json:"bot"`
 	Guild   string         `json:"guild"`
 	Targets []ResyncTarget `json:"targets"`
-	// the only way I found to properly do seeking
-	// if I don't pass it here storeLoop overwrites changes made by the seek call
-	SeekPos time.Duration `json:"seek_pos"`
 }
 
 const (
@@ -454,22 +449,7 @@ func (o *orcaServer) Skip(ctx context.Context, in *pb.GuildOnlyRequest) (*emptyp
 
 	o.logger.Infof("Skipping track in guild %s", in.GuildID)
 
-	var current models.RemoteTrack
-
-	err = o.store.
-		NewSelect().
-		Model(&current).
-		Where("bot_id = ? AND guild_id = ?", bot.ID, guild.ID).
-		Order("ord_key").
-		Limit(1).
-		Scan(ctx)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		o.logger.Errorf("Error getting current track: %+v", err)
-
-		return nil, ErrInternal
-	}
-
-	err = current.DeleteOrRequeue(ctx, o.store)
+	err = models.DeleteOrRequeueCurrent(ctx, o.store, bot.ID, guild.ID)
 	if err != nil {
 		o.logger.Errorf("Error deleting or requeuing current track: %+v", err)
 
@@ -499,7 +479,8 @@ func (o *orcaServer) Stop(ctx context.Context, in *pb.GuildOnlyRequest) (*emptyp
 	_, err = o.store.
 		NewDelete().
 		Model((*models.RemoteTrack)(nil)).
-		Where("bot_id = ? AND guild_id = ?", bot.ID, guild.ID).
+		Where("bot_id = ?", bot.ID).
+		Where("guild_id = ?", guild.ID).
 		Exec(ctx)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		o.logger.Errorf("Error deleting all tracks: %+v", err)
@@ -541,7 +522,7 @@ func (o *orcaServer) Seek(ctx context.Context, in *pb.SeekRequest) (*pb.SeekRepl
 		return nil, ErrInternal
 	}
 
-	err = o.sendResyncSeek(ctx, bot.ID, guild.ID, in.Position.AsDuration(), ResyncTargetCurrent)
+	err = o.sendResync(ctx, bot.ID, guild.ID, ResyncTargetCurrent)
 	if err != nil {
 		o.logger.Errorf("Error sending resync target")
 
@@ -589,12 +570,15 @@ func (o *orcaServer) ShuffleQueue(ctx context.Context, in *pb.GuildOnlyRequest) 
 				NewSelect().
 				Model((*models.RemoteTrack)(nil)).
 				Column("id", "ord_key").
-				Where("bot_id = ? AND guild_id = ?", bot.ID, guild.ID).
+				Where("bot_id = ?", bot.ID).
+				Where("guild_id = ?", guild.ID).
 				Order("ord_key").
 				Limit(1),
 		).
 		Set("ord_key = RANDOM() * ? + 1 + curr.ord_key", edgeOrdKeyDiff).
-		Where("bot_id = ? AND guild_id = ? AND tracks.id != curr.id", bot.ID, guild.ID).
+		Where("bot_id = ?", bot.ID).
+		Where("guild_id = ?", guild.ID).
+		Where("tracks.id != curr.id").
 		Exec(ctx)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -622,7 +606,8 @@ func (o *orcaServer) GetTracks(ctx context.Context, in *pb.GetTracksRequest) (*p
 	countQuery := o.store.
 		NewSelect().
 		Model(&tracks).
-		Where("bot_id = ? AND guild_id = ?", bot.ID, guild.ID)
+		Where("bot_id = ?", bot.ID).
+		Where("guild_id = ?", guild.ID)
 
 	qlen, err := countQuery.Count(ctx)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -934,7 +919,7 @@ func (o *orcaServer) doResync(ctx context.Context, logger *zap.SugaredLogger, ma
 					logger.Errorf("Error resyncing guild: %+v", err)
 				}
 			case ResyncTargetCurrent:
-				managed.ResyncGuildTrack(ctx, r.Guild, r.SeekPos)
+				managed.ResyncGuildTrack(ctx, r.Guild)
 			}
 		}()
 	}
@@ -963,20 +948,10 @@ func (o *orcaServer) handleResync(ctx context.Context, logger *zap.SugaredLogger
 }
 
 func (o *orcaServer) sendResync(ctx context.Context, botID, guildID string, targets ...ResyncTarget) error {
-	return o.sendResyncSeek(ctx, botID, guildID, utils.MinDuration, targets...)
-}
-
-func (o *orcaServer) sendResyncSeek(
-	ctx context.Context,
-	botID, guildID string,
-	seekPos time.Duration,
-	targets ...ResyncTarget,
-) error {
 	b, err := json.Marshal(ResyncMessage{
 		Bot:     botID,
 		Guild:   guildID,
 		Targets: targets,
-		SeekPos: seekPos,
 	})
 	if err != nil {
 		return errorx.Decorate(err, "marshal resync message")

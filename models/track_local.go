@@ -31,8 +31,6 @@ type LocalTrack struct {
 	extractors *extractor.Extractors
 
 	// potentially changeable lockable values
-	remote   *RemoteTrack
-	remoteMu sync.RWMutex `exhaustruct:"optional"`
 	cmd      *exec.Cmd
 	cmdMu    sync.RWMutex `exhaustruct:"optional"`
 	stream   io.ReadCloser
@@ -40,9 +38,6 @@ type LocalTrack struct {
 	// pos is duplicated here to leave remote concurrency-safe
 	pos   time.Duration
 	posMu sync.RWMutex `exhaustruct:"optional"`
-
-	// seek channel, weird, but I didn't find better ideas on how to make seeking consistent
-	seek chan time.Duration
 }
 
 func NewLocalTrack(logger *zap.SugaredLogger, store *store.Store, extractors *extractor.Extractors) *LocalTrack {
@@ -50,25 +45,23 @@ func NewLocalTrack(logger *zap.SugaredLogger, store *store.Store, extractors *ex
 		logger:     logger.Named("track"),
 		store:      store,
 		extractors: extractors,
-		remote:     nil,
 		cmd:        nil,
 		stream:     nil,
 		pos:        0,
-
-		seek: make(chan time.Duration, 1),
 	}
 }
 
 func (t *LocalTrack) initialized() bool {
-	return t.getRemote() != nil && t.getCMD() != nil && t.getStream() != nil
+	cmd := t.getCMD()
+	stream := t.getStream()
+
+	return cmd != nil && stream != nil
 }
 
-func (t *LocalTrack) initialize(ctx context.Context) error {
+func (t *LocalTrack) initialize(ctx context.Context, remote *RemoteTrack) error {
 	if t.initialized() {
 		return nil
 	}
-
-	remote := t.getRemote()
 
 	if remote.StreamURL == "" {
 		err := t.setStreamURL(ctx, remote)
@@ -103,6 +96,8 @@ func (t *LocalTrack) setStreamURL(ctx context.Context, remote *RemoteTrack) erro
 }
 
 func (t *LocalTrack) startStream(remote *RemoteTrack) error {
+	t.setPos(remote.Pos)
+
 	ffmpegArgs := []string{
 		"-headers", remote.getFormattedHeaders(),
 		"-reconnect", "1",
@@ -191,7 +186,7 @@ func (t *LocalTrack) getPacket(packet []byte) error {
 		}
 
 		if !errors.Is(err, io.ErrUnexpectedEOF) {
-			return errorx.Decorate(err, "read audio Stream")
+			return errorx.Decorate(err, "read audio stream")
 		}
 
 		// fill rest of the packet with zeros

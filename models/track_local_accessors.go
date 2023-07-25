@@ -6,29 +6,6 @@ import (
 	"time"
 )
 
-func (t *LocalTrack) getRemote() *RemoteTrack {
-	t.remoteMu.RLock()
-	defer t.remoteMu.RUnlock()
-
-	return t.remote
-}
-
-func (t *LocalTrack) setRemote(v *RemoteTrack) {
-	t.remoteMu.Lock()
-	defer t.remoteMu.Unlock()
-
-	t.remote = v
-
-	if v != nil {
-		select {
-		case seekPos := <-t.seek:
-			t.setPos(seekPos)
-		default:
-			t.setPos(v.Pos)
-		}
-	}
-}
-
 func (t *LocalTrack) getCMD() *exec.Cmd {
 	t.cmdMu.RLock()
 	defer t.cmdMu.RUnlock()

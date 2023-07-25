@@ -33,19 +33,32 @@ func (g *RemoteGuild) UpdateQuery(store *store.Store) *bun.UpdateQuery {
 }
 
 func (g *RemoteGuild) CurrentTrackQuery(store *store.Store) *bun.SelectQuery {
-	return g.PositionTrackQuery(store, 0)
+	return CurrentTrackQuery(store, g.BotID, g.ID)
 }
 
 func (g *RemoteGuild) PositionTrackQuery(store *store.Store, position int) *bun.SelectQuery {
-	return g.TracksQuery(store).
+	return PositionTrackQuery(store, position, g.BotID, g.ID)
+}
+
+func (g *RemoteGuild) TracksQuery(store *store.Store) *bun.SelectQuery {
+	return TracksQuery(store, g.BotID, g.ID)
+}
+
+func CurrentTrackQuery(store *store.Store, botID, guildID string) *bun.SelectQuery {
+	return PositionTrackQuery(store, 0, botID, guildID)
+}
+
+func PositionTrackQuery(store *store.Store, position int, botID, guildID string) *bun.SelectQuery {
+	return TracksQuery(store, botID, guildID).
 		Order("ord_key").
 		Offset(position).
 		Limit(1)
 }
 
-func (g *RemoteGuild) TracksQuery(store *store.Store) *bun.SelectQuery {
+func TracksQuery(store *store.Store, botID, guildID string) *bun.SelectQuery {
 	return store.
 		NewSelect().
 		Model((*RemoteTrack)(nil)).
-		Where("bot_id = ? AND guild_id = ?", g.BotID, g.ID)
+		Where("bot_id = ?", botID).
+		Where("guild_id = ?", guildID)
 }
