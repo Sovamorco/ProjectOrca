@@ -1,7 +1,6 @@
 package main
 
 import (
-	"ProjectOrca/vk"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -13,6 +12,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"ProjectOrca/vk"
 
 	"ProjectOrca/spotify"
 	"ProjectOrca/ytdl"

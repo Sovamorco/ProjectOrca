@@ -1,18 +1,20 @@
 package vk
 
 import (
-	"ProjectOrca/extractor"
-	"ProjectOrca/utils"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/joomcode/errorx"
-	"go.uber.org/zap"
 	"mime/multipart"
 	"net/http"
 	"time"
+
+	"ProjectOrca/extractor"
+	"ProjectOrca/utils"
+
+	"github.com/joomcode/errorx"
+	"go.uber.org/zap"
 )
 
 const (
@@ -75,11 +77,11 @@ func (v *VK) QueryMatches(_ context.Context, q string) bool {
 }
 
 func (v *VK) ExtractTracksData(ctx context.Context, q string) ([]extractor.TrackData, error) {
-	if matches := utils.VKAlbumRX.FindStringSubmatch(q); len(matches) >= 3 {
+	if matches := utils.VKAlbumRX.FindStringSubmatch(q); len(matches) >= 3 { //nolint:gomnd // no comment
 		return v.extractAlbumTracksData(ctx, matches)
-	} else if matches = utils.VKPersRX.FindStringSubmatch(q); len(matches) >= 2 {
+	} else if matches = utils.VKPersRX.FindStringSubmatch(q); len(matches) >= 2 { //nolint:gomnd // no comment
 		return v.extractPersonalTracksData(ctx, matches)
-	} else if matches = utils.VKTrackRx.FindStringSubmatch(q); len(matches) >= 3 {
+	} else if matches = utils.VKTrackRx.FindStringSubmatch(q); len(matches) >= 3 { //nolint:gomnd // no comment
 		return v.extractTrackData(ctx, matches)
 	}
 
@@ -92,7 +94,7 @@ func (v *VK) extractAlbumTracksData(ctx context.Context, matches []string) ([]ex
 		"playlist_id": matches[2],
 	}
 
-	if len(matches) >= 4 {
+	if len(matches) >= 4 { //nolint:gomnd // no comment
 		body["access_key"] = matches[3]
 	}
 
@@ -130,7 +132,7 @@ func (v *VK) extractTrackData(ctx context.Context, matches []string) ([]extracto
 		"audios": fmt.Sprintf("%s_%s", matches[1], matches[2]),
 	}
 
-	if len(matches) >= 4 {
+	if len(matches) >= 4 { //nolint:gomnd // no comment
 		body["audios"] += fmt.Sprintf("_%s", matches[3])
 	}
 
