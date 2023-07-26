@@ -42,10 +42,9 @@ func New(logger *zap.SugaredLogger) *YTDL {
 	}
 }
 
-func (y *YTDL) QueryMatches(_ context.Context, q string) bool {
-	// matches everything except for spotify
-	// maybe should add more exceptions but whatever
-	return !utils.SpotifyRx.MatchString(q)
+func (y *YTDL) QueryMatches(context.Context, string) bool {
+	// matches everything, use as last extractor
+	return true
 }
 
 func (y *YTDL) ExtractTracksData(_ context.Context, query string) ([]extractor.TrackData, error) {

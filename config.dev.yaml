@@ -2,6 +2,8 @@ port: 8590
 
 spotify: FS->.spotify.yaml
 
+vk: FS->.vk.yaml
+
 db:
   host: 127.0.0.1
   port: 5432

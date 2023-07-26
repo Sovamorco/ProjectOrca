@@ -1,6 +1,7 @@
 package main
 
 import (
+	"ProjectOrca/vk"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -97,8 +98,6 @@ func newOrcaServer(
 		states: sync.Map{},
 	}
 
-	orca.extractors.AddExtractor(ytdl.New(orca.logger))
-
 	if config.Spotify != nil {
 		s, err := spotify.New(
 			ctx,
@@ -111,6 +110,21 @@ func newOrcaServer(
 
 		orca.extractors.AddExtractor(s)
 	}
+
+	if config.VK != nil {
+		v, err := vk.New(
+			ctx,
+			orca.logger,
+			config.VK.Token,
+		)
+		if err != nil {
+			return nil, errorx.Decorate(err, "init vk module")
+		}
+
+		orca.extractors.AddExtractor(v)
+	}
+
+	orca.extractors.AddExtractor(ytdl.New(orca.logger))
 
 	orca.store.Subscribe(ctx, orca.handleResync, ResyncsChannel)
 	orca.store.Subscribe(ctx, orca.handleKeyDel,

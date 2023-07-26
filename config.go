@@ -20,10 +20,15 @@ type Spotify struct {
 	ClientSecret string `mapstructure:"client_secret"`
 }
 
+type VK struct {
+	Token string `mapstructure:"token"`
+}
+
 type Config struct {
 	Port int `mapstructure:"port"`
 
 	Spotify *Spotify          `mapstructure:"spotify"`
+	VK      *VK               `mapstructure:"vk"`
 	DB      store.DBConfig    `mapstructure:"db"`
 	Redis   store.RedisConfig `mapstructure:"redis"`
 }
