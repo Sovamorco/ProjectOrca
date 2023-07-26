@@ -6,11 +6,12 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/joomcode/errorx"
 	"io"
 	"os"
 	"os/exec"
 	"time"
+
+	"github.com/joomcode/errorx"
 )
 
 // Track is basically a wrapper for values commonly passed together - remote track, command, stream, packet.

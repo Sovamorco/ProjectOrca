@@ -3,21 +3,24 @@ package store
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"fmt"
 	"net"
 	"sync"
 	"time"
 
+	"github.com/hashicorp/vault-client-go"
+	"github.com/mitchellh/mapstructure"
+	"github.com/uptrace/bun/driver/pgdriver"
+
 	"github.com/joomcode/errorx"
 
 	"github.com/go-redsync/redsync/v4/redis/goredis/v9"
 
-	"github.com/uptrace/bun/dialect/pgdialect"
-	"github.com/uptrace/bun/driver/pgdriver"
-
 	"github.com/go-redsync/redsync/v4"
 	"github.com/redis/go-redis/v9"
 	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/pgdialect"
 	"go.uber.org/zap"
 )
 
@@ -34,12 +37,18 @@ type Config struct {
 }
 
 type DBConfig struct {
-	Host     string `json:"host"`
-	Port     int    `json:"port"`
-	User     string `json:"user"`
-	Password string `json:"password"`
-	DB       string `json:"db"`
-	SSL      bool   `json:"ssl"`
+	// these are necessary fields
+	Host string `mapstructure:"host"`
+	Port int    `mapstructure:"port"`
+	DB   string `mapstructure:"db"`
+	SSL  bool   `mapstructure:"ssl"`
+
+	// and you either have to supply those
+	Username string `mapstructure:"username"`
+	Password string `mapstructure:"password"`
+
+	// or Role for vault db credentials
+	Role string `mapstructure:"role"`
 }
 
 func (s *DBConfig) getConnString() string {
@@ -50,7 +59,7 @@ func (s *DBConfig) getConnString() string {
 
 	return fmt.Sprintf(
 		"postgres://%s:%s@%s/%s?sslmode=%s",
-		s.User,
+		s.Username,
 		s.Password,
 		net.JoinHostPort(s.Host, fmt.Sprint(s.Port)),
 		s.DB,
@@ -59,11 +68,11 @@ func (s *DBConfig) getConnString() string {
 }
 
 type RedisConfig struct {
-	Host     string `json:"host"`
-	Port     int    `json:"port"`
-	Username string `json:"username"`
-	Password string `json:"password"`
-	DB       int    `json:"db"`
+	Host     string `mapstructure:"host"`
+	Port     int    `mapstructure:"port"`
+	Username string `mapstructure:"username"`
+	Password string `mapstructure:"password"`
+	DB       int    `mapstructure:"db"`
 }
 
 func (r *RedisConfig) getOptions() *redis.Options {
@@ -84,8 +93,44 @@ type Store struct {
 	rs               *redsync.Redsync
 }
 
-func NewStore(logger *zap.SugaredLogger, config *Config) *Store {
-	sqldb := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(config.DB.getConnString())))
+func getDBConfig(ctx context.Context, config *DBConfig, vc *vault.Client) (*DBConfig, error) {
+	if config.Role == "" {
+		return config, nil
+	}
+
+	res, err := vc.Secrets.DatabaseReadRole(ctx, config.Role)
+	if err != nil {
+		return nil, errorx.Decorate(err, "read db role")
+	}
+
+	var newConf DBConfig
+
+	err = mapstructure.Decode(res.Data, &newConf)
+	if err != nil {
+		return nil, errorx.Decorate(err, "load vault role credentials")
+	}
+
+	newConf.DB = config.DB
+	newConf.Host = config.Host
+	newConf.Port = config.Port
+	newConf.SSL = config.SSL
+
+	return &newConf, nil
+}
+
+func createConnectorWrapper(ctx context.Context, config *DBConfig, vc *vault.Client) CreateConnectorFunc {
+	return func() (driver.Connector, error) {
+		dbConfig, err := getDBConfig(ctx, config, vc)
+		if err != nil {
+			return nil, errorx.Decorate(err, "get db connection config")
+		}
+
+		return pgdriver.NewConnector(pgdriver.WithDSN(dbConfig.getConnString())), nil
+	}
+}
+
+func NewStore(ctx context.Context, logger *zap.SugaredLogger, config *Config, vc *vault.Client) *Store {
+	sqldb := sql.OpenDB(Driver{CreateConnectorFunc: createConnectorWrapper(context.WithoutCancel(ctx), &config.DB, vc)})
 	db := bun.NewDB(sqldb, pgdialect.New())
 
 	client := redis.NewClient(config.Broker.getOptions())

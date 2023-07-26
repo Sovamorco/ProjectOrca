@@ -1,27 +1,26 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/rand"
 	"net"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
 
-	"github.com/go-redsync/redsync/v4"
-
-	"ProjectOrca/extractor"
 	"ProjectOrca/spotify"
 	"ProjectOrca/ytdl"
 
+	"github.com/hashicorp/vault-client-go"
+
+	"github.com/go-redsync/redsync/v4"
+
+	"ProjectOrca/extractor"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"ProjectOrca/migrations"
@@ -32,6 +31,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/joomcode/errorx"
 	"github.com/redis/go-redis/v9"
+	gvault "github.com/sovamorco/gommon/vault"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/migrate"
 	"go.uber.org/zap"
@@ -83,10 +83,12 @@ type orcaServer struct {
 	states sync.Map
 }
 
-func newOrcaServer(logger *zap.SugaredLogger, st *store.Store) *orcaServer {
+func newOrcaServer(
+	ctx context.Context, logger *zap.SugaredLogger, st *store.Store, config *Config,
+) (*orcaServer, error) {
 	serverLogger := logger.Named("server")
 
-	return &orcaServer{
+	orca := &orcaServer{
 		id:         uuid.New().String(),
 		logger:     serverLogger,
 		store:      st,
@@ -94,6 +96,34 @@ func newOrcaServer(logger *zap.SugaredLogger, st *store.Store) *orcaServer {
 
 		states: sync.Map{},
 	}
+
+	orca.extractors.AddExtractor(ytdl.New(orca.logger))
+
+	if config.Spotify != nil {
+		s, err := spotify.New(
+			ctx,
+			config.Spotify.ClientID,
+			config.Spotify.ClientSecret,
+		)
+		if err != nil {
+			return nil, errorx.Decorate(err, "init spotify module")
+		}
+
+		orca.extractors.AddExtractor(s)
+	}
+
+	orca.store.Subscribe(ctx, orca.handleResync, ResyncsChannel)
+	orca.store.Subscribe(ctx, orca.handleKeyDel,
+		fmt.Sprintf("__keyevent@%d__:del", config.Redis.DB),
+		fmt.Sprintf("__keyevent@%d__:expired", config.Redis.DB),
+	)
+
+	err := orca.initFromStore(ctx)
+	if err != nil {
+		return nil, errorx.Decorate(err, "init from store")
+	}
+
+	return orca, nil
 }
 
 func (o *orcaServer) gracefulShutdown(ctx context.Context) {
@@ -751,9 +781,30 @@ func main() {
 
 	logger := coreLogger.Sugar()
 
-	err = run(context.Background(), logger)
+	ctx := context.Background()
+
+	var vc *vault.Client
+
+	var config *Config
+
+	if os.Getenv("PRODUCTION") == "true" {
+		vc, err = gvault.ClientFromEnv(ctx)
+		if err != nil {
+			logger.Fatalf("Error creating vault client: %+v", err)
+		}
+
+		config, err = loadConfig(ctx, vc)
+	} else {
+		config, err = loadConfigDev(ctx)
+	}
+
 	if err != nil {
-		logger.Fatalf("%+v", err)
+		logger.Fatalf("Error loading config: %+v", err)
+	}
+
+	err = run(ctx, logger, vc, config)
+	if err != nil {
+		logger.Fatalf("Error running: %+v", err)
 	}
 }
 
@@ -800,26 +851,13 @@ func doMigrate(ctx context.Context, logger *zap.SugaredLogger, db *bun.DB) error
 	return nil
 }
 
-func run(ctx context.Context, logger *zap.SugaredLogger) error { //nolint:funlen,cyclop // FIXME
-	redisConfig := store.RedisConfig{
-		Host:     "127.0.0.1",
-		Port:     6379, //nolint:gomnd // TODO: proper config
-		Username: "orca",
-		Password: "local",
-		DB:       0,
-	}
-
-	st := store.NewStore(logger, &store.Config{
-		DB: store.DBConfig{
-			Host:     "127.0.0.1",
-			Port:     5432, //nolint:gomnd // TODO: proper config
-			User:     "root",
-			Password: "local",
-			DB:       "orca",
-			SSL:      false,
-		},
-		Broker: redisConfig,
-	})
+func run(
+	ctx context.Context, logger *zap.SugaredLogger, vc *vault.Client, config *Config,
+) error {
+	st := store.NewStore(ctx, logger, &store.Config{
+		DB:     config.DB,
+		Broker: config.Redis,
+	}, vc)
 
 	err := doMigrate(ctx, logger, st.DB)
 	if err != nil {
@@ -830,55 +868,14 @@ func run(ctx context.Context, logger *zap.SugaredLogger) error { //nolint:funlen
 
 	var lc net.ListenConfig
 
-	lis, err := lc.Listen(ctx, "tcp", fmt.Sprintf(":%d", port))
+	lis, err := lc.Listen(ctx, "tcp", fmt.Sprintf(":%d", config.Port))
 	if err != nil {
-		lis, err = lc.Listen(ctx, "tcp", fmt.Sprintf(":%d", rand.Intn(10000)+10000)) //nolint:gosec,gomnd // TODO: remove me
-		if err != nil {
-			return errorx.Decorate(err, "listen")
-		}
+		return errorx.Decorate(err, "listen")
 	}
 
-	orca := newOrcaServer(logger, st)
-
-	orca.extractors.AddExtractor(ytdl.New(orca.logger))
-
-	sfile, err := os.Open(".spotify") // TODO: replace with proper config
+	orca, err := newOrcaServer(ctx, logger, st, config)
 	if err != nil {
-		return err //nolint:wrapcheck
-	}
-
-	r := bufio.NewReader(sfile)
-
-	cid, err := r.ReadString('\n')
-	if err != nil {
-		return err //nolint:wrapcheck
-	}
-
-	cs, err := r.ReadString('\n')
-	if err != nil {
-		return err //nolint:wrapcheck
-	}
-
-	s, err := spotify.New( // TODO: conditionally create based on config
-		ctx,
-		strings.TrimSpace(cid),
-		strings.TrimSpace(cs),
-	)
-	if err != nil {
-		return errorx.Decorate(err, "init spotify module")
-	}
-
-	orca.extractors.AddExtractor(s)
-
-	orca.store.Subscribe(ctx, orca.handleResync, ResyncsChannel)
-	orca.store.Subscribe(ctx, orca.handleKeyDel,
-		fmt.Sprintf("__keyevent@%d__:del", redisConfig.DB),
-		fmt.Sprintf("__keyevent@%d__:expired", redisConfig.DB),
-	)
-
-	err = orca.initFromStore(ctx)
-	if err != nil {
-		return errorx.Decorate(err, "init from store")
+		return errorx.Decorate(err, "create orca server")
 	}
 
 	grpcServer := grpc.NewServer()

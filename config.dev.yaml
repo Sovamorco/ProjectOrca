@@ -1,0 +1,16 @@
+port: 8590
+
+db:
+  host: 127.0.0.1
+  port: 5432
+  username: root
+  password: local
+  db: orca
+  ssl: false
+
+redis:
+  host: 127.0.0.1
+  port: 6379
+  username: orca
+  password: local
+  db: 1
