@@ -7,9 +7,11 @@ require (
 	github.com/go-redsync/redsync/v4 v4.8.1
 	github.com/google/uuid v1.3.0
 	github.com/hashicorp/go-multierror v1.1.1
+	github.com/hashicorp/vault-client-go v0.3.3
 	github.com/joomcode/errorx v1.1.1
+	github.com/mitchellh/mapstructure v1.5.0
 	github.com/redis/go-redis/v9 v9.0.5
-	github.com/sovamorco/gommon v0.0.0-20230726110028-013a297ef97c
+	github.com/sovamorco/gommon v0.0.0-20230726114518-3bc30841a3ba
 	github.com/uptrace/bun v1.1.14
 	github.com/uptrace/bun/dialect/pgdialect v1.1.14
 	github.com/uptrace/bun/driver/pgdriver v1.1.14
@@ -31,10 +33,8 @@ require (
 	github.com/hashicorp/go-retryablehttp v0.7.4 // indirect
 	github.com/hashicorp/go-rootcerts v1.0.2 // indirect
 	github.com/hashicorp/go-secure-stdlib/strutil v0.1.2 // indirect
-	github.com/hashicorp/vault-client-go v0.3.3 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
-	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/ryanuber/go-glob v1.0.0 // indirect
 	github.com/stretchr/testify v1.8.2 // indirect

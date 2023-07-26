@@ -16,8 +16,8 @@ const (
 )
 
 type Spotify struct {
-	ClientID     string
-	ClientSecret string
+	ClientID     string `mapstructure:"client_id"`
+	ClientSecret string `mapstructure:"client_secret"`
 }
 
 type Config struct {
