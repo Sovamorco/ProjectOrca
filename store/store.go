@@ -166,6 +166,8 @@ func (s *Store) GracefulShutdown(ctx context.Context) {
 }
 
 func (s *Store) Unsubscribe(ctx context.Context) {
+	s.logger.Info("Unsubscribing")
+
 	var wg sync.WaitGroup
 
 	for _, f := range s.unsubscribeFuncs {
