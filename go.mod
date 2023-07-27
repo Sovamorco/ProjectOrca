@@ -11,7 +11,7 @@ require (
 	github.com/joomcode/errorx v1.1.1
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/redis/go-redis/v9 v9.0.5
-	github.com/sovamorco/gommon v0.0.0-20230727085323-70f8949f5459
+	github.com/sovamorco/gommon v0.0.0-20230727090457-a2f39c03834f
 	github.com/uptrace/bun v1.1.14
 	github.com/uptrace/bun/dialect/pgdialect v1.1.14
 	github.com/uptrace/bun/driver/pgdriver v1.1.14
