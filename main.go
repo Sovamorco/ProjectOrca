@@ -909,7 +909,7 @@ func run(
 	logger.Infof("Started gRPC server on port %d", port)
 
 	sc := make(chan os.Signal, 1)
-	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
+	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM)
 	select {
 	case err = <-serverErrors:
 		logger.Errorf("Error listening for gRPC calls: %+v", err)

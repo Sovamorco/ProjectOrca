@@ -150,6 +150,8 @@ func NewStore(ctx context.Context, logger *zap.SugaredLogger, config *Config, vc
 }
 
 func (s *Store) GracefulShutdown(ctx context.Context) {
+	s.logger.Info("Shutting down")
+
 	s.doShutdownFuncs(ctx)
 
 	err := s.DB.Close()
