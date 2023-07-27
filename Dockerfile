@@ -40,4 +40,4 @@ COPY --from=builder /src/bin/ ./bin
 COPY config.yaml ./
 USER appuser:appuser
 
-ENTRYPOINT ["sh", "-c", "exec /src/bin/orca"]
+ENTRYPOINT ["/lib/apk/exec /src/bin/orca"]
