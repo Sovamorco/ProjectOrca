@@ -22,17 +22,33 @@ type Track struct {
 	remote *RemoteTrack
 	cmd    *exec.Cmd
 	stream io.ReadCloser
-	packet []byte
+
+	sendLoopDone chan struct{}
+	packetChan   chan []byte
 }
 
 func NewTrack(guild *Guild) *Track {
-	return &Track{
+	t := &Track{
 		g: guild,
 
 		remote: nil,
 		cmd:    nil,
 		stream: nil,
-		packet: make([]byte, packetSize),
+
+		sendLoopDone: make(chan struct{}, 1),
+		packetChan:   make(chan []byte, packetBurstNum),
+	}
+
+	go t.sendLoop()
+
+	return t
+}
+
+func (t *Track) shutdown() {
+	// make sure this does not block
+	select {
+	case t.sendLoopDone <- struct{}{}:
+	default:
 	}
 }
 
@@ -155,7 +171,9 @@ func (t *Track) clean() {
 }
 
 func (t *Track) getPacket() error {
-	n, err := io.ReadFull(t.stream, t.packet)
+	packet := make([]byte, packetSize)
+
+	n, err := io.ReadFull(t.stream, packet)
 	if err != nil {
 		if errors.Is(err, io.EOF) {
 			// additionally wait for ffmpeg to exit because we need exit code
@@ -170,10 +188,12 @@ func (t *Track) getPacket() error {
 		}
 
 		// fill rest of the packet with zeros
-		for i := n; i < len(t.packet); i++ {
-			t.packet[i] = 0
+		for i := n; i < len(packet); i++ {
+			packet[i] = 0
 		}
 	}
+
+	t.packetChan <- packet
 
 	return nil
 }
@@ -326,5 +346,32 @@ func (t *Track) incrementPos() {
 	select {
 	case t.g.posChan <- posMsg{pos: t.remote.Pos, id: t.remote.ID}:
 	default:
+	}
+}
+
+func (t *Track) sendLoop() {
+	var packet []byte
+
+	for {
+		select {
+		case <-t.sendLoopDone:
+			return
+		case packet = <-t.packetChan:
+		}
+
+		t.g.vcMu.RLock()
+
+		if t.g.vc == nil || !t.g.vc.Ready {
+			t.g.vcMu.RUnlock()
+
+			continue
+		}
+
+		select {
+		case t.g.vc.OpusSend <- packet:
+		case <-time.After(opusSendTimeout):
+		}
+
+		t.g.vcMu.RUnlock()
 	}
 }

@@ -17,13 +17,14 @@ import (
 )
 
 const (
-	sampleRate  = 48000
-	channels    = 1
-	frameSizeMs = 20
-	bitrate     = 128000 // bits/s
-	packetSize  = bitrate * frameSizeMs / 1000 / 8
+	sampleRate     = 48000
+	channels       = 1
+	frameSizeMs    = 20
+	bitrate        = 128000 // bits/s
+	packetSize     = bitrate * frameSizeMs / 1000 / 8
+	packetBurstNum = 10
 
-	bufferMilliseconds = 100 // also dynaudnorm (possibly) has its own buffer
+	bufferMilliseconds = 500 // also dynaudnorm (possibly) has its own buffer
 	bufferPackets      = bufferMilliseconds / frameSizeMs
 
 	storeInterval = 1000 * time.Millisecond
@@ -188,6 +189,8 @@ func (g *Guild) playLoop(ctx context.Context) {
 
 		switch {
 		case errors.Is(err, ErrShuttingDown):
+			track.shutdown()
+
 			return
 		case err != nil:
 			time.Sleep(playLoopSleep)
@@ -195,23 +198,7 @@ func (g *Guild) playLoop(ctx context.Context) {
 			continue
 		}
 
-		g.sendOnVC(track.packet)
-
 		track.incrementPos()
-	}
-}
-
-func (g *Guild) sendOnVC(packet []byte) {
-	g.vcMu.RLock()
-	defer g.vcMu.RUnlock()
-
-	if g.vc == nil || !g.vc.Ready {
-		return
-	}
-
-	select {
-	case g.vc.OpusSend <- packet:
-	case <-time.After(opusSendTimeout):
 	}
 }
 
