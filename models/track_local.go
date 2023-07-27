@@ -159,7 +159,9 @@ func (t *Track) clean() {
 }
 
 func (t *Track) readPacket() error {
-	n, err := io.ReadFull(t.stream, t.packet)
+	packet := make([]byte, packetSize)
+
+	n, err := io.ReadFull(t.stream, packet)
 	if err != nil {
 		if errors.Is(err, io.EOF) {
 			// additionally wait for ffmpeg to exit because we need exit code
@@ -174,8 +176,8 @@ func (t *Track) readPacket() error {
 		}
 
 		// fill rest of the packet with zeros
-		for i := n; i < len(t.packet); i++ {
-			t.packet[i] = 0
+		for i := n; i < len(packet); i++ {
+			packet[i] = 0
 		}
 	}
 
