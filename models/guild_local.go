@@ -20,7 +20,7 @@ const (
 	sampleRate  = 48000
 	channels    = 2
 	frameSizeMs = 20
-	bitrate     = 96000 // bits/s
+	bitrate     = 64000 // bits/s
 	packetSize  = bitrate * frameSizeMs / 1000 / 8
 
 	bufferMilliseconds = 1000 // also dynaudnorm (possibly) has its own buffer
