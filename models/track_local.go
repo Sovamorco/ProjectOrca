@@ -23,8 +23,7 @@ type Track struct {
 	cmd    *exec.Cmd
 	stream io.ReadCloser
 
-	sendLoopDone chan struct{}
-	packetChan   chan []byte
+	packet []byte
 }
 
 func NewTrack(guild *Guild) *Track {
@@ -35,21 +34,10 @@ func NewTrack(guild *Guild) *Track {
 		cmd:    nil,
 		stream: nil,
 
-		sendLoopDone: make(chan struct{}, 1),
-		packetChan:   make(chan []byte, packetBurstNum),
+		packet: make([]byte, packetSize),
 	}
-
-	go t.sendLoop()
 
 	return t
-}
-
-func (t *Track) shutdown() {
-	// make sure this does not block
-	select {
-	case t.sendLoopDone <- struct{}{}:
-	default:
-	}
 }
 
 func (t *Track) initialized() bool {
@@ -170,34 +158,26 @@ func (t *Track) clean() {
 	t.stream = nil
 }
 
-func (t *Track) sendPacketBurst() error {
-	for i := 0; i < packetBurstNum; i++ {
-		packet := make([]byte, packetSize)
+func (t *Track) readPacket() error {
+	packet := make([]byte, packetSize)
 
-		n, err := io.ReadFull(t.stream, packet)
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				// additionally wait for ffmpeg to exit because we need exit code
-				err := t.waitForCMDExit()
-				if err != nil {
-					return errorx.Decorate(err, "wait for ffmpeg")
-				}
-			}
-
-			if !errors.Is(err, io.ErrUnexpectedEOF) {
-				return errorx.Decorate(err, "read audio stream")
-			}
-
-			// fill rest of the packet with zeros
-			for i := n; i < len(packet); i++ {
-				packet[i] = 0
+	n, err := io.ReadFull(t.stream, packet)
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			// additionally wait for ffmpeg to exit because we need exit code
+			err := t.waitForCMDExit()
+			if err != nil {
+				return errorx.Decorate(err, "wait for ffmpeg")
 			}
 		}
 
-		select {
-		case <-t.g.playLoopDone:
-			return ErrShuttingDown
-		case t.packetChan <- packet:
+		if !errors.Is(err, io.ErrUnexpectedEOF) {
+			return errorx.Decorate(err, "read audio stream")
+		}
+
+		// fill rest of the packet with zeros
+		for i := n; i < len(packet); i++ {
+			packet[i] = 0
 		}
 	}
 
@@ -308,7 +288,7 @@ func (t *Track) nextTrackPrecondition(ctx context.Context) error {
 }
 
 func (t *Track) packetPrecondition(ctx context.Context) error {
-	err := t.sendPacketBurst()
+	err := t.readPacket()
 	if err == nil {
 		return nil
 	}
@@ -357,31 +337,16 @@ func (t *Track) incrementPos() {
 	}
 }
 
-func (t *Track) sendLoop() {
-	var packet []byte
+func (t *Track) sendOnVC() {
+	t.g.vcMu.RLock()
+	defer t.g.vcMu.RUnlock()
 
-	for {
-		select {
-		case <-t.sendLoopDone:
-			return
-		case packet = <-t.packetChan:
-		}
+	if t.g.vc == nil || !t.g.vc.Ready {
+		return
+	}
 
-		t.g.vcMu.RLock()
-
-		if t.g.vc == nil || !t.g.vc.Ready {
-			t.g.vcMu.RUnlock()
-
-			continue
-		}
-
-		select {
-		case t.g.vc.OpusSend <- packet:
-		case <-time.After(opusSendTimeout):
-		}
-
-		t.g.vcMu.RUnlock()
-
-		t.incrementPos()
+	select {
+	case t.g.vc.OpusSend <- t.packet:
+	case <-time.After(opusSendTimeout):
 	}
 }

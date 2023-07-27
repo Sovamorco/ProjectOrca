@@ -17,12 +17,11 @@ import (
 )
 
 const (
-	sampleRate     = 48000
-	channels       = 1
-	frameSizeMs    = 20
-	bitrate        = 128000 // bits/s
-	packetSize     = bitrate * frameSizeMs / 1000 / 8
-	packetBurstNum = 10
+	sampleRate  = 48000
+	channels    = 1
+	frameSizeMs = 20
+	bitrate     = 128000 // bits/s
+	packetSize  = bitrate * frameSizeMs / 1000 / 8
 
 	bufferMilliseconds = 500 // also dynaudnorm (possibly) has its own buffer
 	bufferPackets      = bufferMilliseconds / frameSizeMs
@@ -189,14 +188,16 @@ func (g *Guild) playLoop(ctx context.Context) {
 
 		switch {
 		case errors.Is(err, ErrShuttingDown):
-			track.shutdown()
-
 			return
 		case err != nil:
 			time.Sleep(playLoopSleep)
 
 			continue
 		}
+
+		track.sendOnVC()
+
+		track.incrementPos()
 	}
 }
 

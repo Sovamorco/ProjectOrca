@@ -130,8 +130,8 @@ func newOrcaServer(
 
 	orca.store.Subscribe(ctx, orca.handleResync, fmt.Sprintf("%s:%s", config.Redis.Prefix, ResyncsChannel))
 	orca.store.Subscribe(ctx, orca.handleKeyDel,
-		fmt.Sprintf("__keyevent@0__:del"),
-		fmt.Sprintf("__keyevent@0__:expired"),
+		"__keyevent@0__:del",
+		"__keyevent@0__:expired",
 	)
 
 	err := orca.initFromStore(ctx)
