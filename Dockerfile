@@ -33,7 +33,7 @@ RUN adduser \
     --uid "${UID}" \
     "${USER}"
 
-RUN apk add ffmpeg yt-dlp
+RUN apk add ffmpeg yt-dlp opus opus-dev
 
 WORKDIR /src
 COPY --from=builder /src/bin/ ./bin
