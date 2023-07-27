@@ -34,7 +34,7 @@ RUN adduser \
     "${USER}"
 
 WORKDIR /src
-COPY --from=builder /src/bin/ ./
+COPY --from=builder /src/bin/ ./bin
 COPY config.yaml ./
 USER appuser:appuser
 
