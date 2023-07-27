@@ -382,6 +382,6 @@ func (t *Track) sendLoop() {
 
 		t.g.vcMu.RUnlock()
 
-		t.incrementPos()
+		t.incrementPos() // FIXME: UNSAFE - BEING CALLED FROM SEPARATE GOROUTINE FROM playLoop
 	}
 }
