@@ -95,7 +95,7 @@ func (t *Track) startStream() error {
 	ffmpegArgs = append(ffmpegArgs,
 		"-i", t.remote.StreamURL,
 		"-map", "0:a",
-		"-filter:a", "dynaudnorm=p=0.9:r=0.9",
+		//"-filter:a", "dynaudnorm=p=0.9:r=0.9",
 		"-acodec", "libopus",
 		"-f", "data",
 		"-ar", fmt.Sprint(sampleRate),
