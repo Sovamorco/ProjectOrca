@@ -197,8 +197,6 @@ func (g *Guild) playLoop(ctx context.Context) {
 
 			continue
 		}
-
-		track.incrementPos()
 	}
 }
 

@@ -170,30 +170,36 @@ func (t *Track) clean() {
 	t.stream = nil
 }
 
-func (t *Track) getPacket() error {
-	packet := make([]byte, packetSize)
+func (t *Track) sendPacketBurst() error {
+	for i := 0; i < packetBurstNum; i++ {
+		packet := make([]byte, packetSize)
 
-	n, err := io.ReadFull(t.stream, packet)
-	if err != nil {
-		if errors.Is(err, io.EOF) {
-			// additionally wait for ffmpeg to exit because we need exit code
-			err := t.waitForCMDExit()
-			if err != nil {
-				return errorx.Decorate(err, "wait for ffmpeg")
+		n, err := io.ReadFull(t.stream, packet)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				// additionally wait for ffmpeg to exit because we need exit code
+				err := t.waitForCMDExit()
+				if err != nil {
+					return errorx.Decorate(err, "wait for ffmpeg")
+				}
+			}
+
+			if !errors.Is(err, io.ErrUnexpectedEOF) {
+				return errorx.Decorate(err, "read audio stream")
+			}
+
+			// fill rest of the packet with zeros
+			for i := n; i < len(packet); i++ {
+				packet[i] = 0
 			}
 		}
 
-		if !errors.Is(err, io.ErrUnexpectedEOF) {
-			return errorx.Decorate(err, "read audio stream")
-		}
-
-		// fill rest of the packet with zeros
-		for i := n; i < len(packet); i++ {
-			packet[i] = 0
+		select {
+		case <-t.g.playLoopDone:
+			return ErrShuttingDown
+		case t.packetChan <- packet:
 		}
 	}
-
-	t.packetChan <- packet
 
 	return nil
 }
@@ -302,9 +308,13 @@ func (t *Track) nextTrackPrecondition(ctx context.Context) error {
 }
 
 func (t *Track) packetPrecondition(ctx context.Context) error {
-	err := t.getPacket()
+	err := t.sendPacketBurst()
 	if err == nil {
 		return nil
+	}
+
+	if errors.Is(err, ErrShuttingDown) {
+		return ErrShuttingDown
 	}
 
 	if errors.Is(err, io.EOF) {
@@ -312,8 +322,6 @@ func (t *Track) packetPrecondition(ctx context.Context) error {
 		if err != nil {
 			t.g.logger.Errorf("Error stopping current track: %+v", err)
 		}
-
-		t.clean()
 
 		return io.EOF
 	}
@@ -373,5 +381,7 @@ func (t *Track) sendLoop() {
 		}
 
 		t.g.vcMu.RUnlock()
+
+		t.incrementPos()
 	}
 }
