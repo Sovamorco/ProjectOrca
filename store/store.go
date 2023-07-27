@@ -100,7 +100,7 @@ func getDBConfig(ctx context.Context, config *DBConfig, vc *vault.Client) (*DBCo
 		return config, nil
 	}
 
-	res, err := vc.Secrets.DatabaseReadRole(ctx, config.RoleName, vault.WithMountPath(databaseMountPath))
+	res, err := vc.Secrets.DatabaseGenerateCredentials(ctx, config.RoleName, vault.WithMountPath(databaseMountPath))
 	if err != nil {
 		return nil, errorx.Decorate(err, "read db role")
 	}
