@@ -18,9 +18,9 @@ import (
 
 const (
 	sampleRate  = 48000
-	channels    = 2
+	channels    = 1
 	frameSizeMs = 20
-	bitrate     = 48000 // bits/s
+	bitrate     = 32000 // bits/s
 	packetSize  = bitrate * frameSizeMs / 1000 / 8
 
 	bufferMilliseconds = 1000 // also dynaudnorm (possibly) has its own buffer
