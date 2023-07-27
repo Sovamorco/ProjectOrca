@@ -47,8 +47,8 @@ type DBConfig struct {
 	Username string `mapstructure:"username"`
 	Password string `mapstructure:"password"`
 
-	// or Role for vault db credentials
-	Role string `mapstructure:"role"`
+	// or RoleName for vault db credentials
+	RoleName string `mapstructure:"role_name"`
 }
 
 func (s *DBConfig) getConnString() string {
@@ -94,17 +94,14 @@ type Store struct {
 }
 
 func getDBConfig(ctx context.Context, config *DBConfig, vc *vault.Client) (*DBConfig, error) {
-	if config.Role == "" {
+	if config.RoleName == "" {
 		return config, nil
 	}
 
-	res, err := vc.Secrets.DatabaseReadRole(ctx, config.Role)
+	res, err := vc.Secrets.DatabaseReadRole(ctx, config.RoleName)
 	if err != nil {
 		return nil, errorx.Decorate(err, "read db role")
 	}
-
-	fmt.Println(res.Data)
-	fmt.Println(res.Auth)
 
 	var newConf DBConfig
 
