@@ -149,16 +149,18 @@ func (g *Guild) storeLoop(ctx context.Context) {
 			// check if ticker passed
 			select {
 			case <-ticker.C:
-				_, err := g.store.
-					NewUpdate().
-					Model((*RemoteTrack)(nil)).
-					Set("pos = ?", pos.pos).
-					Where("id = ?", pos.id).
-					Exec(ctx)
-				if err != nil {
-					g.logger.Errorf("Error storing track position: %+v", err)
-				}
 			default:
+				continue
+			}
+
+			_, err := g.store.
+				NewUpdate().
+				Model((*RemoteTrack)(nil)).
+				Set("pos = ?", pos.pos).
+				Where("id = ?", pos.id).
+				Exec(ctx)
+			if err != nil {
+				g.logger.Errorf("Error storing track position: %+v", err)
 			}
 		}
 	}

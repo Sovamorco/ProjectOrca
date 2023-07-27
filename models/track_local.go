@@ -199,6 +199,8 @@ func (t *Track) sendPacketBurst() error {
 			return ErrShuttingDown
 		case t.packetChan <- packet:
 		}
+
+		t.incrementPos() // technically inaccurate, can go up to frameSizeMs * packetBurstNum in the future
 	}
 
 	return nil
@@ -381,7 +383,5 @@ func (t *Track) sendLoop() {
 		}
 
 		t.g.vcMu.RUnlock()
-
-		t.incrementPos() // FIXME: UNSAFE - BEING CALLED FROM SEPARATE GOROUTINE FROM playLoop
 	}
 }
