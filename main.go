@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -127,10 +128,10 @@ func newOrcaServer(
 
 	orca.extractors.AddExtractor(ytdl.New(orca.logger))
 
-	orca.store.Subscribe(ctx, orca.handleResync, ResyncsChannel)
+	orca.store.Subscribe(ctx, orca.handleResync, fmt.Sprintf("%s:%s", config.Redis.Prefix, ResyncsChannel))
 	orca.store.Subscribe(ctx, orca.handleKeyDel,
-		fmt.Sprintf("__keyevent@%d__:del", config.Redis.DB),
-		fmt.Sprintf("__keyevent@%d__:expired", config.Redis.DB),
+		fmt.Sprintf("__keyevent@0__:del"),
+		fmt.Sprintf("__keyevent@0__:expired"),
 	)
 
 	err := orca.initFromStore(ctx)
@@ -977,7 +978,7 @@ func (o *orcaServer) sendResync(ctx context.Context, botID, guildID string, targ
 		return errorx.Decorate(err, "marshal resync message")
 	}
 
-	err = o.store.Publish(ctx, ResyncsChannel, b).Err()
+	err = o.store.Publish(ctx, fmt.Sprintf("%s:%s", o.store.RedisPrefix, ResyncsChannel), b).Err()
 	if err != nil {
 		return errorx.Decorate(err, "publish resync message")
 	}
@@ -986,7 +987,16 @@ func (o *orcaServer) sendResync(ctx context.Context, botID, guildID string, targ
 }
 
 func (o *orcaServer) handleKeyDel(ctx context.Context, logger *zap.SugaredLogger, msg *redis.Message) error {
-	logger.Infof("Lock for %s expired, trying takeover", msg.Payload)
+	val := msg.Payload
+	pref := fmt.Sprintf("%s:", o.store.RedisPrefix)
+
+	if !strings.HasPrefix(val, pref) {
+		return nil
+	}
+
+	val = strings.TrimPrefix(val, pref)
+
+	logger.Infof("Lock for %s expired, trying takeover", val)
 
 	err := o.initFromStore(ctx)
 	if err != nil {
