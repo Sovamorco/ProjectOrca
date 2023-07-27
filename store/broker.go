@@ -3,11 +3,10 @@ package store
 import (
 	"context"
 	"fmt"
-	"sync"
-	"time"
-
 	"github.com/go-redsync/redsync/v4"
 	"github.com/joomcode/errorx"
+	"sync"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
