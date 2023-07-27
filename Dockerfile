@@ -33,6 +33,8 @@ RUN adduser \
     --uid "${UID}" \
     "${USER}"
 
+RUN apk install ffmpeg yt-dlp
+
 WORKDIR /src
 COPY --from=builder /src/bin/ ./bin
 COPY config.yaml ./
