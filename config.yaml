@@ -1,0 +1,9 @@
+port: 8590
+
+spotify: VAULT->orca/spotify
+
+vk: VAULT->orca/vk
+
+db: VAULT->orca/db_connection_profile
+
+redis: VAULT->orca/redis_connection_profile
