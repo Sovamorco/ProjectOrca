@@ -103,6 +103,9 @@ func getDBConfig(ctx context.Context, config *DBConfig, vc *vault.Client) (*DBCo
 		return nil, errorx.Decorate(err, "read db role")
 	}
 
+	fmt.Println(res.Data)
+	fmt.Println(res.Auth)
+
 	var newConf DBConfig
 
 	err = mapstructure.Decode(res.Data, &newConf)
@@ -124,9 +127,6 @@ func createConnectorWrapper(ctx context.Context, config *DBConfig, vc *vault.Cli
 		if err != nil {
 			return nil, errorx.Decorate(err, "get db connection config")
 		}
-
-		fmt.Println(dbConfig)
-		fmt.Println(dbConfig.getConnString())
 
 		return pgdriver.NewConnector(pgdriver.WithDSN(dbConfig.getConnString())), nil
 	}
