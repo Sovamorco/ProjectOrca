@@ -146,16 +146,9 @@ func (o *orcaServer) gracefulShutdown(ctx context.Context) {
 	o.logger.Info("Shutting down")
 
 	o.states.Range(func(_, value any) bool {
-		o.logger.Debug("test")
-
 		state, _ := value.(*models.Bot)
 
-		o.logger.Debug("Shutting down state ", state)
-		o.logger.Debugf("ID %s", state.GetID())
-
 		state.GracefulShutdown()
-
-		o.logger.Debug("Successfully shut down state")
 
 		return true
 	})
