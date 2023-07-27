@@ -23,7 +23,7 @@ const (
 	bitrate     = 32000 // bits/s
 	packetSize  = bitrate * frameSizeMs / 1000 / 8
 
-	bufferMilliseconds = 1000 // also dynaudnorm (possibly) has its own buffer
+	bufferMilliseconds = 100 // also dynaudnorm (possibly) has its own buffer
 	bufferPackets      = bufferMilliseconds / frameSizeMs
 
 	storeInterval = 1000 * time.Millisecond
