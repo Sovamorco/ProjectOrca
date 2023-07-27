@@ -125,6 +125,9 @@ func createConnectorWrapper(ctx context.Context, config *DBConfig, vc *vault.Cli
 			return nil, errorx.Decorate(err, "get db connection config")
 		}
 
+		fmt.Println(dbConfig)
+		fmt.Println(dbConfig.getConnString())
+
 		return pgdriver.NewConnector(pgdriver.WithDSN(dbConfig.getConnString())), nil
 	}
 }
