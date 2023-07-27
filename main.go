@@ -155,6 +155,8 @@ func (o *orcaServer) gracefulShutdown(ctx context.Context) {
 
 		state.GracefulShutdown()
 
+		o.logger.Debug("Successfully shut down state")
+
 		return true
 	})
 
