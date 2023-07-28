@@ -249,6 +249,8 @@ func (g *Guild) playLoopPreconditions(ctx context.Context, track *Track) error {
 func (g *Guild) vcPrecondition(ctx context.Context) error {
 	if vc := g.getVC(); vc != nil {
 		if !vc.Ready {
+			g.logger.Debug("Connection exists but not ready")
+
 			g.vcMu.Lock()
 			err := vc.Disconnect()
 			g.vc = nil
