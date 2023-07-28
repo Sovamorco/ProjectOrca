@@ -352,7 +352,8 @@ func (t *Track) incrementPos() {
 
 	t.remote.Pos += frameSizeMs * time.Millisecond
 	compensation := frameSizeMs * time.Millisecond * time.Duration(len(t.packetChan)) // compensate for packet buffer
-	compensation = min(compensation, t.remote.Pos)                                    // compensation cannot be more than position itself
+
+	compensation = min(compensation, t.remote.Pos) // compensation cannot be more than position itself
 
 	// make sure this does not block
 	select {
