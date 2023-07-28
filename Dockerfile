@@ -17,7 +17,7 @@ COPY config.go go.mod go.sum main.go ./
 
 RUN go mod vendor  \
     && go mod verify \
-    && GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o /src/bin/orca .
+    && GOOS=linux GOARCH=amd64 GOMAXPROCS=1 go build -gcflags="all=-c=1" -ldflags="-w -s" -o /src/bin/orca .
 
 
 FROM alpine:latest
