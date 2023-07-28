@@ -23,7 +23,7 @@ jobs:
       run: echo "image=orca:$(git rev-parse --short HEAD)" >> $GITHUB_ENV
 
     - name: Build image
-      run: DOCKER_BUILDKIT=1 docker build --cpu-quota 100000 -t ${{ env.image }} .
+      run: DOCKER_BUILDKIT=1 docker build --cpu-quota 50000 -t ${{ env.image }} .
 
     - name: Update service
       run: docker service update orca --image ${{ env.image }} --update-failure-action rollback --rollback-failure-action continue | tee /tmp/capture.out
