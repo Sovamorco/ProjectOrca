@@ -200,7 +200,7 @@ func (t *Track) sendPacketBurst() error {
 		case t.packetChan <- packet:
 		}
 
-		t.incrementPos() // technically inaccurate, can go up to frameSizeMs * packetBurstNum in the future
+		t.incrementPos()
 	}
 
 	return nil
@@ -351,10 +351,12 @@ func (t *Track) incrementPos() {
 	}
 
 	t.remote.Pos += frameSizeMs * time.Millisecond
+	compensation := frameSizeMs * time.Millisecond * time.Duration(len(t.packetChan)) // compensate for packet buffer
+	compensation = min(compensation, t.remote.Pos)                                    // compensation cannot be more than position itself
 
 	// make sure this does not block
 	select {
-	case t.g.posChan <- posMsg{pos: t.remote.Pos, id: t.remote.ID}:
+	case t.g.posChan <- posMsg{pos: t.remote.Pos - compensation, id: t.remote.ID}:
 	default:
 	}
 }
