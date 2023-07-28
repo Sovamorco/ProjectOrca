@@ -9,12 +9,12 @@ require (
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/hashicorp/vault-client-go v0.3.3
 	github.com/joomcode/errorx v1.1.1
+	github.com/lib/pq v1.10.9
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/redis/go-redis/v9 v9.0.5
 	github.com/sovamorco/gommon v0.0.0-20230727091758-a61f596af755
 	github.com/uptrace/bun v1.1.14
 	github.com/uptrace/bun/dialect/pgdialect v1.1.14
-	github.com/uptrace/bun/driver/pgdriver v1.1.14
 	github.com/zmb3/spotify/v2 v2.3.1
 	go.uber.org/zap v1.24.0
 	golang.org/x/oauth2 v0.7.0
@@ -52,5 +52,4 @@ require (
 	google.golang.org/appengine v1.6.7 // indirect
 	google.golang.org/genproto v0.0.0-20230410155749-daa745c078e1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	mellium.im/sasl v0.3.1 // indirect
 )

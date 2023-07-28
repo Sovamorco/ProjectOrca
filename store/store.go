@@ -9,11 +9,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hashicorp/vault-client-go"
-	"github.com/mitchellh/mapstructure"
-	"github.com/uptrace/bun/driver/pgdriver"
+	"github.com/lib/pq"
 
+	"github.com/hashicorp/vault-client-go"
 	"github.com/joomcode/errorx"
+	"github.com/mitchellh/mapstructure"
 
 	"github.com/go-redsync/redsync/v4/redis/goredis/v9"
 
@@ -127,7 +127,12 @@ func createConnectorWrapper(ctx context.Context, config *DBConfig, vc *vault.Cli
 			return nil, errorx.Decorate(err, "get db connection config")
 		}
 
-		return pgdriver.NewConnector(pgdriver.WithDSN(dbConfig.getConnString())), nil
+		c, err := pq.NewConnector(dbConfig.getConnString())
+		if err != nil {
+			return nil, errorx.Decorate(err, "create new connector")
+		}
+
+		return c, nil
 	}
 }
 
