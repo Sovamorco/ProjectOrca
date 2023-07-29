@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"time"
 
+	"google.golang.org/protobuf/types/known/durationpb"
+
 	"ProjectOrca/vk"
 
 	"ProjectOrca/spotify"
@@ -659,20 +661,29 @@ func (o *orcaServer) GetTracks(ctx context.Context, in *pb.GetTracksRequest) (*p
 
 	var tracks []*models.RemoteTrack
 
-	countQuery := o.store.
+	var qlen int
+
+	var totalDuration time.Duration
+
+	err = o.store.
 		NewSelect().
 		Model(&tracks).
 		Where("bot_id = ?", bot.ID).
-		Where("guild_id = ?", guild.ID)
-
-	qlen, err := countQuery.Count(ctx)
+		Where("guild_id = ?", guild.ID).
+		ColumnExpr("SUM(duration)").
+		ColumnExpr("COUNT(duration)").
+		Scan(ctx, &totalDuration, &qlen)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		o.logger.Errorf("Error getting queue length: %+v", err)
 
 		return nil, ErrInternal
 	}
 
-	err = countQuery.
+	err = o.store.
+		NewSelect().
+		Model(&tracks).
+		Where("bot_id = ?", bot.ID).
+		Where("guild_id = ?", guild.ID).
 		Order("ord_key").
 		Offset(int(in.Start)).
 		Limit(int(in.End - in.Start)).
@@ -689,9 +700,10 @@ func (o *orcaServer) GetTracks(ctx context.Context, in *pb.GetTracksRequest) (*p
 	}
 
 	return &pb.GetTracksReply{
-		Tracks:      res,
-		TotalTracks: int64(qlen),
-		Looping:     guild.Loop,
+		Tracks:        res,
+		TotalTracks:   int64(qlen),
+		Looping:       guild.Loop,
+		TotalDuration: durationpb.New(totalDuration),
 	}, nil
 }
 
