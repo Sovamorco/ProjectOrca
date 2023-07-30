@@ -663,16 +663,23 @@ func (o *orcaServer) GetTracks(ctx context.Context, in *pb.GetTracksRequest) (*p
 
 	var qlen int
 
-	var totalDuration time.Duration
+	var remaining time.Duration
 
-	err = o.store.
+	q := o.store.
 		NewSelect().
 		Model(&tracks).
 		Where("bot_id = ?", bot.ID).
 		Where("guild_id = ?", guild.ID).
-		ColumnExpr("SUM(duration)").
-		ColumnExpr("COUNT(duration)").
-		Scan(ctx, &totalDuration, &qlen)
+		ColumnExpr("COUNT(duration)")
+
+	// subtract position of every track if queue is not looping, because we want remaining duration
+	if guild.Loop {
+		q = q.ColumnExpr("SUM(duration)")
+	} else {
+		q = q.ColumnExpr("SUM(duration) - SUM(pos)")
+	}
+
+	err = q.Scan(ctx, &qlen, &remaining)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		o.logger.Errorf("Error getting queue length: %+v", err)
 
@@ -700,10 +707,10 @@ func (o *orcaServer) GetTracks(ctx context.Context, in *pb.GetTracksRequest) (*p
 	}
 
 	return &pb.GetTracksReply{
-		Tracks:        res,
-		TotalTracks:   int64(qlen),
-		Looping:       guild.Loop,
-		TotalDuration: durationpb.New(totalDuration),
+		Tracks:      res,
+		TotalTracks: int64(qlen),
+		Looping:     guild.Loop,
+		Remaining:   durationpb.New(remaining),
 	}, nil
 }
 
