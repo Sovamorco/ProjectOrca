@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
+	"sync"
 	"time"
+
+	"golang.org/x/oauth2"
 
 	"ProjectOrca/extractor"
 	"ProjectOrca/utils"
@@ -36,9 +38,10 @@ type YTDLSearchDatum struct {
 }
 
 type Spotify struct {
-	client     *spotify.Client
-	httpClient *http.Client
-	config     *clientcredentials.Config
+	sync.RWMutex `exhaustruct:"optional"`
+	client       *spotify.Client
+	config       *clientcredentials.Config
+	token        *oauth2.Token
 }
 
 func New(ctx context.Context, clientID, clientSecret string) (*Spotify, error) {
@@ -60,9 +63,9 @@ func New(ctx context.Context, clientID, clientSecret string) (*Spotify, error) {
 	client := spotify.New(httpClient)
 
 	return &Spotify{
-		client:     client,
-		httpClient: httpClient,
-		config:     config,
+		client: client,
+		config: config,
+		token:  token,
 	}, nil
 }
 
@@ -116,30 +119,37 @@ func (s *Spotify) ExtractStreamURL(_ context.Context, _ string) (string, time.Du
 }
 
 func (s *Spotify) refreshToken(ctx context.Context) error {
-	curr, err := s.client.Token()
-	if err != nil {
-		return errorx.Decorate(err, "get current token")
-	}
+	s.RLock()
 
-	if curr.Valid() {
+	if s.token.Valid() {
+		s.RUnlock()
+
 		return nil
 	}
 
 	newToken, err := s.config.Token(ctx)
 	if err != nil {
+		s.RUnlock()
+
 		return errorx.Decorate(err, "generate new token")
 	}
 
-	s.config.Client(ctx)
-
 	newClient := spotifyauth.New().Client(ctx, newToken)
-	s.httpClient.Transport = newClient.Transport
+	s.RUnlock()
+
+	s.Lock()
+	s.token = newToken
+	s.client = spotify.New(newClient)
+	s.Unlock()
 
 	return nil
 }
 
 func (s *Spotify) getTrackData(ctx context.Context, id spotify.ID) ([]extractor.TrackData, error) {
+	s.RLock()
 	tracks, err := s.client.GetTracks(ctx, []spotify.ID{id})
+	s.RUnlock()
+
 	if err != nil {
 		return nil, errorx.Decorate(err, "get spotify tracks")
 	}
@@ -169,7 +179,10 @@ func (s *Spotify) getAlbumTracksIter(ctx context.Context, id spotify.ID) ([]spot
 	res := make([]spotify.SimpleTrack, 0)
 
 	for {
+		s.RLock()
 		page, err := s.client.GetAlbumTracks(ctx, id, spotify.Limit(tracksItemsLimit), spotify.Offset(len(res)))
+		s.RUnlock()
+
 		if err != nil {
 			return nil, errorx.Decorate(err, "get album tracks")
 		}
@@ -213,7 +226,10 @@ func (s *Spotify) getPlaylistItemsIter(ctx context.Context, id spotify.ID) ([]sp
 	res := make([]spotify.PlaylistItem, 0)
 
 	for {
+		s.RLock()
 		page, err := s.client.GetPlaylistItems(ctx, id, spotify.Limit(tracksItemsLimit), spotify.Offset(len(res)))
+		s.RUnlock()
+
 		if err != nil {
 			return nil, errorx.Decorate(err, "get playlist items")
 		}
