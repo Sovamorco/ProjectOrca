@@ -57,15 +57,19 @@ func (y *YTDL) ExtractTracksData(_ context.Context, query string) ([]extractor.T
 		return nil, errorx.Decorate(err, "get ytdl tracks data")
 	}
 
-	res := make([]extractor.TrackData, len(ytd))
+	res := make([]extractor.TrackData, 0, len(ytd))
 
-	for i, datum := range ytd {
+	for _, datum := range ytd {
+		if datum.Duration == 0 {
+			continue
+		}
+
 		originalURL := datum.URL
 		if datum.OriginalURL != "" {
 			originalURL = datum.OriginalURL
 		}
 
-		res[i] = extractor.TrackData{
+		res = append(res, extractor.TrackData{
 			Title:         datum.Title,
 			ExtractionURL: originalURL,
 			DisplayURL:    originalURL,
@@ -73,7 +77,11 @@ func (y *YTDL) ExtractTracksData(_ context.Context, query string) ([]extractor.T
 			Live:          datum.IsLive,
 			Duration:      time.Duration(datum.Duration * float64(time.Second)),
 			HTTPHeaders:   datum.HTTPHeaders,
-		}
+		})
+	}
+
+	if len(res) == 0 {
+		return nil, extractor.ErrNoResults
 	}
 
 	return res, nil

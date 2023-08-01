@@ -157,7 +157,7 @@ func (s *Spotify) getTrackData(ctx context.Context, id spotify.ID) ([]extractor.
 		return nil, errorx.Decorate(err, "get spotify tracks")
 	}
 
-	if len(tracks) != 1 || tracks[0] == nil {
+	if len(tracks) != 1 || tracks[0] == nil || tracks[0].TimeDuration() == 0 {
 		return nil, extractor.ErrNoResults
 	}
 
@@ -209,6 +209,10 @@ func (s *Spotify) getAlbumTracksData(ctx context.Context, id spotify.ID) ([]extr
 	res := make([]extractor.TrackData, len(tracks))
 
 	for i, track := range tracks {
+		if track.TimeDuration() == 0 {
+			continue
+		}
+
 		title := getTrackTitle(track)
 
 		res[i] = extractor.TrackData{
@@ -277,7 +281,7 @@ func (s *Spotify) getPlaylistTracksData(ctx context.Context, id spotify.ID) ([]e
 	res := make([]extractor.TrackData, 0, len(items))
 
 	for _, track := range items {
-		if track.Track.Track == nil {
+		if track.Track.Track == nil || track.Track.Track.TimeDuration() == 0 {
 			continue
 		}
 
