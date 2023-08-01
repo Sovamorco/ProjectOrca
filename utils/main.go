@@ -15,3 +15,13 @@ var (
 	VKPersRX  = regexp.MustCompile(`https?://(?:www\.)?vk\.com/.*?audios(-?[0-9]+)`)
 	VKTrackRx = regexp.MustCompile(`https?://(?:www\.)?vk\.com/.*?audio(-?[0-9]+)_([0-9]+)(?:(?:%2f|%2F|/|_)([a-z0-9]+))?`)
 )
+
+func Flatten[S ~[]E, E any](s []S) S {
+	var res S
+
+	for _, l := range s {
+		res = append(res, l...)
+	}
+
+	return res
+}

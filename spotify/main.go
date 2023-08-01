@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/hashicorp/go-multierror"
 
 	"golang.org/x/oauth2"
 
@@ -20,7 +23,7 @@ import (
 )
 
 const (
-	tracksItemsLimit = 50
+	pageSize = 50
 )
 
 var (
@@ -180,7 +183,7 @@ func (s *Spotify) getAlbumTracksIter(ctx context.Context, id spotify.ID) ([]spot
 
 	for {
 		s.RLock()
-		page, err := s.client.GetAlbumTracks(ctx, id, spotify.Limit(tracksItemsLimit), spotify.Offset(len(res)))
+		page, err := s.client.GetAlbumTracks(ctx, id, spotify.Limit(pageSize), spotify.Offset(len(res)))
 		s.RUnlock()
 
 		if err != nil {
@@ -223,25 +226,46 @@ func (s *Spotify) getAlbumTracksData(ctx context.Context, id spotify.ID) ([]extr
 }
 
 func (s *Spotify) getPlaylistItemsIter(ctx context.Context, id spotify.ID) ([]spotify.PlaylistItem, error) {
-	res := make([]spotify.PlaylistItem, 0)
+	s.RLock()
+	pl, err := s.client.GetPlaylist(ctx, id, spotify.Limit(0))
+	s.RUnlock()
 
-	for {
-		s.RLock()
-		page, err := s.client.GetPlaylistItems(ctx, id, spotify.Limit(tracksItemsLimit), spotify.Offset(len(res)))
-		s.RUnlock()
-
-		if err != nil {
-			return nil, errorx.Decorate(err, "get playlist items")
-		}
-
-		res = append(res, page.Items...)
-
-		if len(res) == page.Total {
-			break
-		}
+	if err != nil {
+		return nil, errorx.Decorate(err, "get playlist")
 	}
 
-	return res, nil
+	pages := make([][]spotify.PlaylistItem, int(math.Ceil(float64(pl.Tracks.Total)/pageSize)))
+
+	var eg multierror.Group
+
+	for pagenum := range pages {
+		pagenum := pagenum
+
+		eg.Go(func() error {
+			s.RLock()
+			page, err := s.client.GetPlaylistItems(
+				ctx, id,
+				spotify.Limit(pageSize),
+				spotify.Offset(pagenum*pageSize),
+			)
+			s.RUnlock()
+
+			if err != nil {
+				return errorx.Decorate(err, "get playlist items")
+			}
+
+			pages[pagenum] = page.Items
+
+			return nil
+		})
+	}
+
+	err = eg.Wait().ErrorOrNil()
+	if err != nil {
+		return nil, errorx.Decorate(err, "get item pages")
+	}
+
+	return utils.Flatten(pages), nil
 }
 
 func (s *Spotify) getPlaylistTracksData(ctx context.Context, id spotify.ID) ([]extractor.TrackData, error) {
