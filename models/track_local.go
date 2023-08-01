@@ -14,6 +14,11 @@ import (
 	"github.com/joomcode/errorx"
 )
 
+const (
+	// after end of queue and before disconnecting wait for packetburst to hopefully be empty.
+	endQueueDisconnectDelay = packetBurstNum * frameSizeMs * time.Millisecond
+)
+
 // Track is basically a wrapper for values commonly passed together - remote track, command, stream, packet.
 // It is not concurrency-safe, should be used within one goroutine.
 type Track struct {
@@ -260,6 +265,8 @@ func (t *Track) checkForNextTrack(ctx context.Context) error {
 	if !errors.Is(err, ErrEmptyQueue) {
 		return errorx.Decorate(err, "get track from store")
 	}
+
+	time.Sleep(endQueueDisconnectDelay)
 
 	err = t.g.connect(ctx, "")
 	if err != nil {
