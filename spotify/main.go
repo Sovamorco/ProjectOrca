@@ -250,12 +250,16 @@ func (s *Spotify) getPlaylistTracksData(ctx context.Context, id spotify.ID) ([]e
 		return nil, errorx.Decorate(err, "get playlist")
 	}
 
-	res := make([]extractor.TrackData, len(items))
+	res := make([]extractor.TrackData, 0, len(items))
 
-	for i, track := range items {
+	for _, track := range items {
+		if track.Track.Track == nil {
+			continue
+		}
+
 		title := getTrackTitle(track.Track.Track.SimpleTrack)
 
-		res[i] = extractor.TrackData{
+		res = append(res, extractor.TrackData{
 			Title:         title,
 			ExtractionURL: getExtractionURL(title),
 			DisplayURL:    getTrackDisplayURL(track.Track.Track.SimpleTrack),
@@ -263,7 +267,7 @@ func (s *Spotify) getPlaylistTracksData(ctx context.Context, id spotify.ID) ([]e
 			Live:          false,
 			Duration:      track.Track.Track.TimeDuration(),
 			HTTPHeaders:   nil,
-		}
+		})
 	}
 
 	return res, nil
