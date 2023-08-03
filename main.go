@@ -420,23 +420,9 @@ func (o *orcaServer) Play(ctx context.Context, in *pb.PlayRequest) (*pb.PlayRepl
 
 	// that concerns current track and guild voice state
 	if affectedFirst {
-		if guild.ChannelID != in.ChannelID {
-			guild.ChannelID = in.ChannelID
-
-			_, err = guild.UpdateQuery(o.store).Column("channel_id").Exec(ctx)
-			if err != nil {
-				o.logger.Errorf("Error updating guild channel id: %+v", err)
-
-				return nil, ErrInternal
-			}
-		}
-
-		err = o.sendResync(ctx, bot.ID, guild.ID, ResyncTargetCurrent, ResyncTargetGuild)
-
+		err = o.queueStartResync(ctx, guild, bot.ID, in.ChannelID)
 		if err != nil {
-			o.logger.Errorf("Error sending resync message: %+v", err)
-
-			return nil, ErrInternal
+			return nil, err
 		}
 	}
 
@@ -808,6 +794,226 @@ func (o *orcaServer) Remove(ctx context.Context, in *pb.RemoveRequest) (*emptypb
 	}
 
 	return &emptypb.Empty{}, nil
+}
+
+func (o *orcaServer) SavePlaylist(ctx context.Context, in *pb.SavePlaylistRequest) (*emptypb.Empty, error) {
+	_, guild, err := o.authenticateWithGuild(ctx, in.GuildID)
+	if err != nil {
+		o.logger.Errorf("Error authenticating request: %+v", err)
+
+		return nil, ErrFailedToAuthenticate
+	}
+
+	pl := models.Playlist{
+		ID:     uuid.New().String(),
+		UserID: in.UserID,
+		Name:   in.Name,
+	}
+
+	tx, err := o.store.Begin()
+	if err != nil {
+		o.logger.Errorf("Error beginning transaction: %+v", err)
+
+		return nil, ErrInternal
+	}
+
+	_, err = tx.
+		NewInsert().
+		Model(&pl).
+		Exec(ctx)
+	if err != nil {
+		o.logger.Errorf("Error storing playlist: %+v", err)
+
+		return nil, ErrInternal
+	}
+
+	_, err = tx.
+		NewInsert().
+		Model((*models.PlaylistTrack)(nil)).
+		TableExpr(
+			"(?) as queue",
+			guild.
+				TracksQuery(o.store).
+				ColumnExpr("gen_random_uuid(), ?", pl.ID).
+				Column("duration", "ord_key", "title", "extraction_url",
+					"stream_url", "http_headers", "live", "display_url"),
+		).
+		Exec(ctx)
+	if err != nil {
+		o.logger.Errorf("Error storing playlist tracks: %+v", err)
+
+		return nil, ErrInternal
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		o.logger.Errorf("Error committing transaction: %+v", err)
+
+		return nil, ErrInternal
+	}
+
+	return &emptypb.Empty{}, nil
+}
+
+func (o *orcaServer) ListPlaylists(ctx context.Context, in *pb.ListPlaylistsRequest) (*pb.ListPlaylistsReply, error) {
+	_, _, err := o.authenticateWithGuild(ctx, in.GuildID)
+	if err != nil {
+		o.logger.Errorf("Error authenticating request: %+v", err)
+
+		return nil, ErrFailedToAuthenticate
+	}
+
+	var playlists []*struct {
+		ID            string
+		Name          string
+		TotalTracks   int64
+		TotalDuration time.Duration
+	}
+
+	err = o.store.
+		NewSelect().
+		Model((*models.Playlist)(nil)).
+		ModelTableExpr("playlists").
+		ColumnExpr("playlists.id, playlists.name").
+		ColumnExpr("(?) AS total_tracks",
+			o.store.
+				NewSelect().
+				Model((*models.PlaylistTrack)(nil)).
+				Where("playlist_id = playlists.id").
+				ColumnExpr("COUNT(duration)"),
+		).
+		ColumnExpr("(?) AS total_duration",
+			o.store.
+				NewSelect().
+				Model((*models.PlaylistTrack)(nil)).
+				Where("playlist_id = playlists.id").
+				ColumnExpr("SUM(duration)"),
+		).
+		Where("user_id = ?", in.UserID).
+		Scan(ctx, &playlists)
+	if err != nil {
+		o.logger.Errorf("Error selecting user playlists: %+v", err)
+
+		return nil, ErrInternal
+	}
+
+	res := make([]*pb.Playlist, len(playlists))
+
+	for i, pl := range playlists {
+		res[i] = &pb.Playlist{
+			Id:            pl.ID,
+			Name:          pl.Name,
+			TotalTracks:   pl.TotalTracks,
+			TotalDuration: durationpb.New(pl.TotalDuration),
+		}
+	}
+
+	return &pb.ListPlaylistsReply{
+		Playlists: res,
+	}, nil
+}
+
+func (o *orcaServer) LoadPlaylist(ctx context.Context, in *pb.LoadPlaylistRequest) (*pb.PlayReply, error) {
+	bot, guild, err := o.authenticateWithGuild(ctx, in.GuildID)
+	if err != nil {
+		o.logger.Errorf("Error authenticating request: %+v", err)
+
+		return nil, ErrFailedToAuthenticate
+	}
+
+	qmax := 0.
+
+	count, err := guild.TracksQuery(o.store).
+		ColumnExpr("MAX(ord_key)").
+		ScanAndCount(ctx, &qmax)
+	if err != nil {
+		o.logger.Errorf("Error getting max current ord key: %+v", err)
+
+		return nil, ErrInternal
+	}
+
+	qempty := count == 0
+
+	protoTracks, err := o.addPlaylistTracks(ctx, bot.ID, guild.ID, in.PlaylistID, qmax)
+	if err != nil {
+		o.logger.Errorf("Error adding playlist tracks: %+v", err)
+
+		return nil, ErrInternal
+	}
+
+	if qempty {
+		err = o.queueStartResync(ctx, guild, bot.ID, in.ChannelID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return &pb.PlayReply{
+		Tracks: protoTracks,
+	}, nil
+}
+
+func (o *orcaServer) addPlaylistTracks(
+	ctx context.Context,
+	botID, guildID, playlistID string,
+	qmax float64,
+) ([]*pb.TrackData, error) {
+	var playlistTracks []*models.PlaylistTrack
+
+	err := o.store.
+		NewSelect().
+		Model(&playlistTracks).
+		Where("playlist_id = ?", playlistID).
+		Order("ord_key").
+		Scan(ctx)
+	if err != nil {
+		return nil, errorx.Decorate(err, "get playlist tracks")
+	} else if len(playlistTracks) == 0 {
+		return nil, extractor.ErrNoResults
+	}
+
+	tracks := make([]*models.RemoteTrack, len(playlistTracks))
+	tracksData := make([]*pb.TrackData, len(playlistTracks))
+
+	baseOrdKey := qmax - playlistTracks[0].OrdKey + edgeOrdKeyDiff
+
+	for i, track := range playlistTracks {
+		tracks[i] = track.ToRemote(botID, guildID, baseOrdKey)
+
+		tracksData[i] = tracks[i].ToProto()
+	}
+
+	_, err = o.store.
+		NewInsert().
+		Model(&tracks).
+		Exec(ctx)
+	if err != nil {
+		return nil, errorx.Decorate(err, "add playlist tracks to queue")
+	}
+
+	return tracksData, nil
+}
+
+func (o *orcaServer) queueStartResync(ctx context.Context, guild *models.RemoteGuild, botID, channelID string) error {
+	if guild.ChannelID != channelID {
+		guild.ChannelID = channelID
+
+		_, err := guild.UpdateQuery(o.store).Column("channel_id").Exec(ctx)
+		if err != nil {
+			o.logger.Errorf("Error updating guild channel id: %+v", err)
+
+			return ErrInternal
+		}
+	}
+
+	err := o.sendResync(ctx, botID, guild.ID, ResyncTargetCurrent, ResyncTargetGuild)
+	if err != nil {
+		o.logger.Errorf("Error sending resync message: %+v", err)
+
+		return ErrInternal
+	}
+
+	return nil
 }
 
 func main() {

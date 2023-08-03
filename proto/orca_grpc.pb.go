@@ -35,6 +35,9 @@ type OrcaClient interface {
 	Loop(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	ShuffleQueue(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	Remove(ctx context.Context, in *RemoveRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	SavePlaylist(ctx context.Context, in *SavePlaylistRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	LoadPlaylist(ctx context.Context, in *LoadPlaylistRequest, opts ...grpc.CallOption) (*PlayReply, error)
+	ListPlaylists(ctx context.Context, in *ListPlaylistsRequest, opts ...grpc.CallOption) (*ListPlaylistsReply, error)
 }
 
 type orcaClient struct {
@@ -153,6 +156,33 @@ func (c *orcaClient) Remove(ctx context.Context, in *RemoveRequest, opts ...grpc
 	return out, nil
 }
 
+func (c *orcaClient) SavePlaylist(ctx context.Context, in *SavePlaylistRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, "/orca.Orca/SavePlaylist", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *orcaClient) LoadPlaylist(ctx context.Context, in *LoadPlaylistRequest, opts ...grpc.CallOption) (*PlayReply, error) {
+	out := new(PlayReply)
+	err := c.cc.Invoke(ctx, "/orca.Orca/LoadPlaylist", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *orcaClient) ListPlaylists(ctx context.Context, in *ListPlaylistsRequest, opts ...grpc.CallOption) (*ListPlaylistsReply, error) {
+	out := new(ListPlaylistsReply)
+	err := c.cc.Invoke(ctx, "/orca.Orca/ListPlaylists", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // OrcaServer is the server API for Orca service.
 // All implementations must embed UnimplementedOrcaServer
 // for forward compatibility
@@ -169,6 +199,9 @@ type OrcaServer interface {
 	Loop(context.Context, *GuildOnlyRequest) (*emptypb.Empty, error)
 	ShuffleQueue(context.Context, *GuildOnlyRequest) (*emptypb.Empty, error)
 	Remove(context.Context, *RemoveRequest) (*emptypb.Empty, error)
+	SavePlaylist(context.Context, *SavePlaylistRequest) (*emptypb.Empty, error)
+	LoadPlaylist(context.Context, *LoadPlaylistRequest) (*PlayReply, error)
+	ListPlaylists(context.Context, *ListPlaylistsRequest) (*ListPlaylistsReply, error)
 	mustEmbedUnimplementedOrcaServer()
 }
 
@@ -211,6 +244,15 @@ func (UnimplementedOrcaServer) ShuffleQueue(context.Context, *GuildOnlyRequest) 
 }
 func (UnimplementedOrcaServer) Remove(context.Context, *RemoveRequest) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Remove not implemented")
+}
+func (UnimplementedOrcaServer) SavePlaylist(context.Context, *SavePlaylistRequest) (*emptypb.Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SavePlaylist not implemented")
+}
+func (UnimplementedOrcaServer) LoadPlaylist(context.Context, *LoadPlaylistRequest) (*PlayReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method LoadPlaylist not implemented")
+}
+func (UnimplementedOrcaServer) ListPlaylists(context.Context, *ListPlaylistsRequest) (*ListPlaylistsReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListPlaylists not implemented")
 }
 func (UnimplementedOrcaServer) mustEmbedUnimplementedOrcaServer() {}
 
@@ -441,6 +483,60 @@ func _Orca_Remove_Handler(srv interface{}, ctx context.Context, dec func(interfa
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Orca_SavePlaylist_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SavePlaylistRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrcaServer).SavePlaylist(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/orca.Orca/SavePlaylist",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrcaServer).SavePlaylist(ctx, req.(*SavePlaylistRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Orca_LoadPlaylist_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LoadPlaylistRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrcaServer).LoadPlaylist(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/orca.Orca/LoadPlaylist",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrcaServer).LoadPlaylist(ctx, req.(*LoadPlaylistRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Orca_ListPlaylists_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListPlaylistsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrcaServer).ListPlaylists(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/orca.Orca/ListPlaylists",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrcaServer).ListPlaylists(ctx, req.(*ListPlaylistsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Orca_ServiceDesc is the grpc.ServiceDesc for Orca service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -495,6 +591,18 @@ var Orca_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Remove",
 			Handler:    _Orca_Remove_Handler,
+		},
+		{
+			MethodName: "SavePlaylist",
+			Handler:    _Orca_SavePlaylist_Handler,
+		},
+		{
+			MethodName: "LoadPlaylist",
+			Handler:    _Orca_LoadPlaylist_Handler,
+		},
+		{
+			MethodName: "ListPlaylists",
+			Handler:    _Orca_ListPlaylists_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

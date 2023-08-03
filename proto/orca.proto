@@ -18,6 +18,9 @@ service Orca {
   rpc Loop (GuildOnlyRequest) returns (google.protobuf.Empty) {}
   rpc ShuffleQueue(GuildOnlyRequest) returns (google.protobuf.Empty) {}
   rpc Remove(RemoveRequest) returns (google.protobuf.Empty) {}
+  rpc SavePlaylist(SavePlaylistRequest) returns (google.protobuf.Empty) {}
+  rpc LoadPlaylist(LoadPlaylistRequest) returns (PlayReply) {}
+  rpc ListPlaylists(ListPlaylistsRequest) returns (ListPlaylistsReply) {}
 }
 
 message JoinRequest {
@@ -68,7 +71,35 @@ message GetTracksReply {
   google.protobuf.Duration remaining = 4;
 }
 
-message RemoveRequest{
+message RemoveRequest {
   string guildID = 1;
   int64 position = 2;
+}
+
+message SavePlaylistRequest {
+  string guildID = 1;
+  string userID = 2;
+  string name = 3;
+}
+
+message LoadPlaylistRequest {
+  string guildID = 1;
+  string playlistID = 2;
+  string channelID = 3;
+}
+
+message ListPlaylistsRequest {
+  string guildID = 1;
+  string userID = 2;
+}
+
+message ListPlaylistsReply {
+  repeated Playlist playlists = 1;
+}
+
+message Playlist {
+  string id = 1;
+  string name = 2;
+  int64 totalTracks = 3;
+  google.protobuf.Duration totalDuration = 4;
 }
