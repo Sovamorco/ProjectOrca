@@ -37,6 +37,7 @@ message PlayRequest {
 
 message PlayReply {
   repeated TrackData tracks = 1;
+  int64 total = 2;
 }
 
 message TrackData {

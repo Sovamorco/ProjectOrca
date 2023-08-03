@@ -62,6 +62,8 @@ const (
 	edgeOrdKeyDiff    = 100
 	defaultPrevOrdKey = 0
 	defaultNextOrdKey = defaultPrevOrdKey + edgeOrdKeyDiff
+
+	maxPlayReplyTracks = 100
 )
 
 // resync targets.
@@ -411,7 +413,7 @@ func (o *orcaServer) Play(ctx context.Context, in *pb.PlayRequest) (*pb.PlayRepl
 		return nil, ErrFailedToAuthenticate
 	}
 
-	tracksData, affectedFirst, err := o.addTracks(ctx, bot, guild, in.Url, int(in.Position))
+	tracksData, total, affectedFirst, err := o.addTracks(ctx, bot, guild, in.Url, int(in.Position))
 	if err != nil {
 		o.logger.Errorf("Error adding tracks: %+v", err)
 
@@ -428,6 +430,7 @@ func (o *orcaServer) Play(ctx context.Context, in *pb.PlayRequest) (*pb.PlayRepl
 
 	return &pb.PlayReply{
 		Tracks: tracksData,
+		Total:  int64(total),
 	}, nil
 }
 
@@ -437,19 +440,19 @@ func (o *orcaServer) addTracks(
 	guild *models.RemoteGuild,
 	url string,
 	position int,
-) ([]*pb.TrackData, bool, error) {
+) ([]*pb.TrackData, int, bool, error) {
 	tracks, err := models.NewRemoteTracks(ctx, bot.ID, guild.ID, url, o.extractors)
 	if err != nil {
 		o.logger.Errorf("Error getting remote tracks: %+v", err)
 
-		return nil, false, ErrInternal
+		return nil, 0, false, ErrInternal
 	}
 
 	qlen, err := guild.TracksQuery(o.store).Count(ctx)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		o.logger.Errorf("Error getting tracks from store: %+v", err)
 
-		return nil, false, ErrInternal
+		return nil, 0, false, ErrInternal
 	}
 
 	prevOrdKey, nextOrdKey, affectedFirst := o.chooseOrdKeyRange(ctx, qlen, position)
@@ -463,15 +466,15 @@ func (o *orcaServer) addTracks(
 	if err != nil {
 		o.logger.Errorf("Error storing tracks: %+v", err)
 
-		return nil, false, ErrInternal
+		return nil, 0, false, ErrInternal
 	}
 
-	res := make([]*pb.TrackData, len(tracks))
-	for i, track := range tracks {
+	res := make([]*pb.TrackData, min(len(tracks), maxPlayReplyTracks))
+	for i, track := range tracks[:maxPlayReplyTracks] {
 		res[i] = track.ToProto()
 	}
 
-	return res, affectedFirst, nil
+	return res, len(tracks), affectedFirst, nil
 }
 
 func (o *orcaServer) Skip(ctx context.Context, in *pb.GuildOnlyRequest) (*emptypb.Empty, error) {
@@ -934,7 +937,7 @@ func (o *orcaServer) LoadPlaylist(ctx context.Context, in *pb.LoadPlaylistReques
 
 	qempty := count == 0
 
-	protoTracks, err := o.addPlaylistTracks(ctx, bot.ID, guild.ID, in.PlaylistID, qmax)
+	protoTracks, total, err := o.addPlaylistTracks(ctx, bot.ID, guild.ID, in.PlaylistID, qmax)
 	if err != nil {
 		o.logger.Errorf("Error adding playlist tracks: %+v", err)
 
@@ -950,6 +953,7 @@ func (o *orcaServer) LoadPlaylist(ctx context.Context, in *pb.LoadPlaylistReques
 
 	return &pb.PlayReply{
 		Tracks: protoTracks,
+		Total:  int64(total),
 	}, nil
 }
 
@@ -957,7 +961,7 @@ func (o *orcaServer) addPlaylistTracks(
 	ctx context.Context,
 	botID, guildID, playlistID string,
 	qmax float64,
-) ([]*pb.TrackData, error) {
+) ([]*pb.TrackData, int, error) {
 	var playlistTracks []*models.PlaylistTrack
 
 	err := o.store.
@@ -967,20 +971,22 @@ func (o *orcaServer) addPlaylistTracks(
 		Order("ord_key").
 		Scan(ctx)
 	if err != nil {
-		return nil, errorx.Decorate(err, "get playlist tracks")
+		return nil, 0, errorx.Decorate(err, "get playlist tracks")
 	} else if len(playlistTracks) == 0 {
-		return nil, extractor.ErrNoResults
+		return nil, 0, extractor.ErrNoResults
 	}
 
 	tracks := make([]*models.RemoteTrack, len(playlistTracks))
-	tracksData := make([]*pb.TrackData, len(playlistTracks))
+	tracksData := make([]*pb.TrackData, min(len(playlistTracks), maxPlayReplyTracks))
 
 	baseOrdKey := qmax - playlistTracks[0].OrdKey + edgeOrdKeyDiff
 
 	for i, track := range playlistTracks {
 		tracks[i] = track.ToRemote(botID, guildID, baseOrdKey)
 
-		tracksData[i] = tracks[i].ToProto()
+		if i < maxPlayReplyTracks {
+			tracksData[i] = tracks[i].ToProto()
+		}
 	}
 
 	_, err = o.store.
@@ -988,10 +994,10 @@ func (o *orcaServer) addPlaylistTracks(
 		Model(&tracks).
 		Exec(ctx)
 	if err != nil {
-		return nil, errorx.Decorate(err, "add playlist tracks to queue")
+		return nil, 0, errorx.Decorate(err, "add playlist tracks to queue")
 	}
 
-	return tracksData, nil
+	return tracksData, len(playlistTracks), nil
 }
 
 func (o *orcaServer) queueStartResync(ctx context.Context, guild *models.RemoteGuild, botID, channelID string) error {
