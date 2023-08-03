@@ -470,7 +470,7 @@ func (o *orcaServer) addTracks(
 	}
 
 	res := make([]*pb.TrackData, min(len(tracks), maxPlayReplyTracks))
-	for i, track := range tracks[:maxPlayReplyTracks] {
+	for i, track := range tracks[:len(res)] {
 		res[i] = track.ToProto()
 	}
 
