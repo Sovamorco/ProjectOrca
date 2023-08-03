@@ -64,6 +64,10 @@ const (
 	defaultNextOrdKey = defaultPrevOrdKey + edgeOrdKeyDiff
 
 	maxPlayReplyTracks = 100
+
+	queueSizeLimit = 500_000
+
+	playlistSizeLimit = 100_000
 )
 
 // resync targets.
@@ -75,6 +79,12 @@ const (
 var (
 	ErrFailedToAuthenticate = status.Error(codes.Unauthenticated, "failed to authenticate bot")
 	ErrInternal             = status.Error(codes.Internal, "internal error")
+
+	ErrQueueTooLarge = status.Error(codes.InvalidArgument,
+		fmt.Sprintf("queue can have at most %d tracks", queueSizeLimit))
+
+	ErrPlaylistTooLarge = status.Error(codes.InvalidArgument,
+		fmt.Sprintf("playlist can have at most %d tracks", playlistSizeLimit))
 )
 
 type orcaServer struct {
@@ -455,6 +465,12 @@ func (o *orcaServer) addTracks(
 		return nil, 0, false, ErrInternal
 	}
 
+	if qlen+len(tracks) > queueSizeLimit {
+		o.logger.Error("Queue size limit reached")
+
+		return nil, 0, false, ErrQueueTooLarge
+	}
+
 	prevOrdKey, nextOrdKey, affectedFirst := o.chooseOrdKeyRange(ctx, qlen, position)
 
 	models.SetOrdKeys(tracks, prevOrdKey, nextOrdKey)
@@ -807,17 +823,39 @@ func (o *orcaServer) SavePlaylist(ctx context.Context, in *pb.SavePlaylistReques
 		return nil, ErrFailedToAuthenticate
 	}
 
+	qlen, err := guild.TracksQuery(o.store).Count(ctx)
+	if err != nil {
+		o.logger.Errorf("Error counting tracks from queue: %+v", err)
+
+		return nil, ErrInternal
+	}
+
+	if qlen == 0 {
+		return nil, status.Error(codes.InvalidArgument, models.ErrEmptyQueue.Error())
+	} else if qlen > playlistSizeLimit {
+		return nil, ErrPlaylistTooLarge
+	}
+
+	err = o.savePlaylist(ctx, guild, in.UserID, in.Name)
+	if err != nil {
+		o.logger.Errorf("Error saving playlist: %+v", err)
+
+		return nil, ErrInternal
+	}
+
+	return &emptypb.Empty{}, nil
+}
+
+func (o *orcaServer) savePlaylist(ctx context.Context, guild *models.RemoteGuild, userID, name string) error {
 	pl := models.Playlist{
 		ID:     uuid.New().String(),
-		UserID: in.UserID,
-		Name:   in.Name,
+		UserID: userID,
+		Name:   name,
 	}
 
 	tx, err := o.store.Begin()
 	if err != nil {
-		o.logger.Errorf("Error beginning transaction: %+v", err)
-
-		return nil, ErrInternal
+		return errorx.Decorate(err, "begin transcation")
 	}
 
 	_, err = tx.
@@ -825,9 +863,7 @@ func (o *orcaServer) SavePlaylist(ctx context.Context, in *pb.SavePlaylistReques
 		Model(&pl).
 		Exec(ctx)
 	if err != nil {
-		o.logger.Errorf("Error storing playlist: %+v", err)
-
-		return nil, ErrInternal
+		return errorx.Decorate(err, "store playlist")
 	}
 
 	_, err = tx.
@@ -843,19 +879,15 @@ func (o *orcaServer) SavePlaylist(ctx context.Context, in *pb.SavePlaylistReques
 		).
 		Exec(ctx)
 	if err != nil {
-		o.logger.Errorf("Error storing playlist tracks: %+v", err)
-
-		return nil, ErrInternal
+		return errorx.Decorate(err, "store playlist tracks")
 	}
 
 	err = tx.Commit()
 	if err != nil {
-		o.logger.Errorf("Error committing transaction: %+v", err)
-
-		return nil, ErrInternal
+		return errorx.Decorate(err, "commit transaction")
 	}
 
-	return &emptypb.Empty{}, nil
+	return nil
 }
 
 func (o *orcaServer) ListPlaylists(ctx context.Context, in *pb.ListPlaylistsRequest) (*pb.ListPlaylistsReply, error) {
@@ -926,19 +958,30 @@ func (o *orcaServer) LoadPlaylist(ctx context.Context, in *pb.LoadPlaylistReques
 
 	qmax := 0.
 
-	count, err := guild.TracksQuery(o.store).
+	qlen, err := guild.TracksQuery(o.store).Count(ctx)
+	if err != nil {
+		o.logger.Errorf("Error counting queue tracks: %+v", err)
+
+		return nil, ErrInternal
+	}
+
+	err = guild.TracksQuery(o.store).
 		ColumnExpr("MAX(ord_key)").
-		ScanAndCount(ctx, &qmax)
+		Scan(ctx, &qmax)
 	if err != nil {
 		o.logger.Errorf("Error getting max current ord key: %+v", err)
 
 		return nil, ErrInternal
 	}
 
-	qempty := count == 0
+	qempty := qlen == 0
 
-	protoTracks, total, err := o.addPlaylistTracks(ctx, bot.ID, guild.ID, in.PlaylistID, qmax)
+	protoTracks, total, err := o.addPlaylistTracks(ctx, bot.ID, guild.ID, in.PlaylistID, qlen, qmax)
 	if err != nil {
+		if errors.Is(err, ErrQueueTooLarge) {
+			return nil, err
+		}
+
 		o.logger.Errorf("Error adding playlist tracks: %+v", err)
 
 		return nil, ErrInternal
@@ -960,6 +1003,7 @@ func (o *orcaServer) LoadPlaylist(ctx context.Context, in *pb.LoadPlaylistReques
 func (o *orcaServer) addPlaylistTracks(
 	ctx context.Context,
 	botID, guildID, playlistID string,
+	qlen int,
 	qmax float64,
 ) ([]*pb.TrackData, int, error) {
 	var playlistTracks []*models.PlaylistTrack
@@ -974,6 +1018,10 @@ func (o *orcaServer) addPlaylistTracks(
 		return nil, 0, errorx.Decorate(err, "get playlist tracks")
 	} else if len(playlistTracks) == 0 {
 		return nil, 0, extractor.ErrNoResults
+	}
+
+	if qlen+len(playlistTracks) > queueSizeLimit {
+		return nil, 0, ErrQueueTooLarge
 	}
 
 	tracks := make([]*models.RemoteTrack, len(playlistTracks))
