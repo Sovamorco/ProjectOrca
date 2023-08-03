@@ -425,6 +425,10 @@ func (o *orcaServer) Play(ctx context.Context, in *pb.PlayRequest) (*pb.PlayRepl
 
 	tracksData, total, affectedFirst, err := o.addTracks(ctx, bot, guild, in.Url, int(in.Position))
 	if err != nil {
+		if errors.Is(err, ErrQueueTooLarge) {
+			return nil, err
+		}
+
 		o.logger.Errorf("Error adding tracks: %+v", err)
 
 		return nil, ErrInternal
@@ -453,21 +457,15 @@ func (o *orcaServer) addTracks(
 ) ([]*pb.TrackData, int, bool, error) {
 	tracks, err := models.NewRemoteTracks(ctx, bot.ID, guild.ID, url, o.extractors)
 	if err != nil {
-		o.logger.Errorf("Error getting remote tracks: %+v", err)
-
-		return nil, 0, false, ErrInternal
+		return nil, 0, false, errorx.Decorate(err, "get remote tracks")
 	}
 
 	qlen, err := guild.TracksQuery(o.store).Count(ctx)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		o.logger.Errorf("Error getting tracks from store: %+v", err)
-
-		return nil, 0, false, ErrInternal
+		return nil, 0, false, errorx.Decorate(err, "count tracks")
 	}
 
 	if qlen+len(tracks) > queueSizeLimit {
-		o.logger.Error("Queue size limit reached")
-
 		return nil, 0, false, ErrQueueTooLarge
 	}
 
@@ -480,9 +478,7 @@ func (o *orcaServer) addTracks(
 		Model(&tracks).
 		Exec(ctx)
 	if err != nil {
-		o.logger.Errorf("Error storing tracks: %+v", err)
-
-		return nil, 0, false, ErrInternal
+		return nil, 0, false, errorx.Decorate(err, "store tracks")
 	}
 
 	res := make([]*pb.TrackData, min(len(tracks), maxPlayReplyTracks))

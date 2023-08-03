@@ -163,13 +163,19 @@ func (s *Spotify) getTrackData(ctx context.Context, id spotify.ID) ([]extractor.
 
 	track := tracks[0]
 
+	displayURL := getTrackDisplayURL(track.SimpleTrack)
+
+	if displayURL == "" {
+		return nil, extractor.ErrNoResults
+	}
+
 	title := getTrackTitle(track.SimpleTrack)
 
 	return []extractor.TrackData{
 		{
 			Title:         title,
 			ExtractionURL: getExtractionURL(title),
-			DisplayURL:    getTrackDisplayURL(track.SimpleTrack),
+			DisplayURL:    displayURL,
 			StreamURL:     "",
 			Live:          false,
 			Duration:      track.TimeDuration(),
@@ -213,12 +219,18 @@ func (s *Spotify) getAlbumTracksData(ctx context.Context, id spotify.ID) ([]extr
 			continue
 		}
 
+		displayURL := getTrackDisplayURL(track)
+
+		if displayURL == "" {
+			continue
+		}
+
 		title := getTrackTitle(track)
 
 		res[i] = extractor.TrackData{
 			Title:         title,
 			ExtractionURL: getExtractionURL(title),
-			DisplayURL:    getTrackDisplayURL(track),
+			DisplayURL:    displayURL,
 			StreamURL:     "",
 			Live:          false,
 			Duration:      track.TimeDuration(),
@@ -285,12 +297,18 @@ func (s *Spotify) getPlaylistTracksData(ctx context.Context, id spotify.ID) ([]e
 			continue
 		}
 
+		displayURL := getTrackDisplayURL(track.Track.Track.SimpleTrack)
+
+		if displayURL == "" {
+			continue
+		}
+
 		title := getTrackTitle(track.Track.Track.SimpleTrack)
 
 		res = append(res, extractor.TrackData{
 			Title:         title,
 			ExtractionURL: getExtractionURL(title),
-			DisplayURL:    getTrackDisplayURL(track.Track.Track.SimpleTrack),
+			DisplayURL:    displayURL,
 			StreamURL:     "",
 			Live:          false,
 			Duration:      track.Track.Track.TimeDuration(),
