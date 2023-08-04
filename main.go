@@ -426,7 +426,7 @@ func (o *orcaServer) Play(ctx context.Context, in *pb.PlayRequest) (*pb.PlayRepl
 	tracksData, total, affectedFirst, err := o.addTracks(ctx, bot, guild, in.Url, int(in.Position))
 	if err != nil {
 		if errors.Is(err, ErrQueueTooLarge) {
-			return nil, err
+			return nil, ErrQueueTooLarge
 		}
 
 		o.logger.Errorf("Error adding tracks: %+v", err)
@@ -975,7 +975,7 @@ func (o *orcaServer) LoadPlaylist(ctx context.Context, in *pb.LoadPlaylistReques
 	protoTracks, total, err := o.addPlaylistTracks(ctx, bot.ID, guild.ID, in.PlaylistID, qlen, qmax)
 	if err != nil {
 		if errors.Is(err, ErrQueueTooLarge) {
-			return nil, err
+			return nil, ErrQueueTooLarge
 		}
 
 		o.logger.Errorf("Error adding playlist tracks: %+v", err)
@@ -1002,46 +1002,77 @@ func (o *orcaServer) addPlaylistTracks(
 	qlen int,
 	qmax float64,
 ) ([]*pb.TrackData, int, error) {
+	playlistTracks, playlistN, err := o.getPlaylistPreview(ctx, qlen, playlistID)
+	if err != nil {
+		return nil, 0, errorx.Decorate(err, "get playlist preview")
+	}
+
+	o.logger.Debugf("Loading playlist with length: %d", playlistN)
+
+	baseOrdKey := qmax - playlistTracks[0].OrdKey + edgeOrdKeyDiff
+
+	_, err = o.store.
+		NewInsert().
+		Model((*models.RemoteTrack)(nil)).
+		TableExpr(
+			"(?) as playlist",
+			o.store.
+				NewSelect().
+				Model((*models.PlaylistTrack)(nil)).
+				Where("playlist_id = ?", playlistID).
+				ColumnExpr("gen_random_uuid(), ?, ?, ?", botID, guildID, 0).
+				Column("duration").
+				ColumnExpr("? + \"ord_key\"", baseOrdKey).
+				Column("title", "extraction_url",
+					"stream_url", "http_headers", "live", "display_url"),
+		).
+		Exec(ctx)
+	if err != nil {
+		return nil, 0, errorx.Decorate(err, "insert playlist into queue")
+	}
+
+	tracksData := make([]*pb.TrackData, len(playlistTracks))
+
+	for i, track := range playlistTracks {
+		if i < maxPlayReplyTracks {
+			tracksData[i] = &pb.TrackData{
+				Title:      track.Title,
+				DisplayURL: track.DisplayURL,
+				Live:       track.Live,
+				Position:   durationpb.New(0),
+				Duration:   durationpb.New(track.Duration),
+			}
+		}
+	}
+
+	return tracksData, playlistN, nil
+}
+
+func (o *orcaServer) getPlaylistPreview(
+	ctx context.Context,
+	qlen int,
+	playlistID string,
+) ([]*models.PlaylistTrack, int, error) {
 	var playlistTracks []*models.PlaylistTrack
 
-	err := o.store.
+	playlistN, err := o.store.
 		NewSelect().
 		Model(&playlistTracks).
 		Where("playlist_id = ?", playlistID).
 		Order("ord_key").
-		Scan(ctx)
+		Limit(maxPlayReplyTracks).
+		ScanAndCount(ctx)
 	if err != nil {
 		return nil, 0, errorx.Decorate(err, "get playlist tracks")
-	} else if len(playlistTracks) == 0 {
+	} else if playlistN == 0 {
 		return nil, 0, extractor.ErrNoResults
 	}
 
-	if qlen+len(playlistTracks) > queueSizeLimit {
+	if qlen+playlistN > queueSizeLimit {
 		return nil, 0, ErrQueueTooLarge
 	}
 
-	tracks := make([]*models.RemoteTrack, len(playlistTracks))
-	tracksData := make([]*pb.TrackData, min(len(playlistTracks), maxPlayReplyTracks))
-
-	baseOrdKey := qmax - playlistTracks[0].OrdKey + edgeOrdKeyDiff
-
-	for i, track := range playlistTracks {
-		tracks[i] = track.ToRemote(botID, guildID, baseOrdKey)
-
-		if i < maxPlayReplyTracks {
-			tracksData[i] = tracks[i].ToProto()
-		}
-	}
-
-	_, err = o.store.
-		NewInsert().
-		Model(&tracks).
-		Exec(ctx)
-	if err != nil {
-		return nil, 0, errorx.Decorate(err, "add playlist tracks to queue")
-	}
-
-	return tracksData, len(playlistTracks), nil
+	return playlistTracks, playlistN, nil
 }
 
 func (o *orcaServer) queueStartResync(ctx context.Context, guild *models.RemoteGuild, botID, channelID string) error {
