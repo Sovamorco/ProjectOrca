@@ -21,6 +21,7 @@ service Orca {
   rpc SavePlaylist(SavePlaylistRequest) returns (google.protobuf.Empty) {}
   rpc LoadPlaylist(LoadPlaylistRequest) returns (PlayReply) {}
   rpc ListPlaylists(ListPlaylistsRequest) returns (ListPlaylistsReply) {}
+  rpc Health(google.protobuf.Empty) returns (google.protobuf.Empty) {}
 }
 
 message JoinRequest {

@@ -38,6 +38,7 @@ type OrcaClient interface {
 	SavePlaylist(ctx context.Context, in *SavePlaylistRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	LoadPlaylist(ctx context.Context, in *LoadPlaylistRequest, opts ...grpc.CallOption) (*PlayReply, error)
 	ListPlaylists(ctx context.Context, in *ListPlaylistsRequest, opts ...grpc.CallOption) (*ListPlaylistsReply, error)
+	Health(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*emptypb.Empty, error)
 }
 
 type orcaClient struct {
@@ -183,6 +184,15 @@ func (c *orcaClient) ListPlaylists(ctx context.Context, in *ListPlaylistsRequest
 	return out, nil
 }
 
+func (c *orcaClient) Health(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, "/orca.Orca/Health", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // OrcaServer is the server API for Orca service.
 // All implementations must embed UnimplementedOrcaServer
 // for forward compatibility
@@ -202,6 +212,7 @@ type OrcaServer interface {
 	SavePlaylist(context.Context, *SavePlaylistRequest) (*emptypb.Empty, error)
 	LoadPlaylist(context.Context, *LoadPlaylistRequest) (*PlayReply, error)
 	ListPlaylists(context.Context, *ListPlaylistsRequest) (*ListPlaylistsReply, error)
+	Health(context.Context, *emptypb.Empty) (*emptypb.Empty, error)
 	mustEmbedUnimplementedOrcaServer()
 }
 
@@ -253,6 +264,9 @@ func (UnimplementedOrcaServer) LoadPlaylist(context.Context, *LoadPlaylistReques
 }
 func (UnimplementedOrcaServer) ListPlaylists(context.Context, *ListPlaylistsRequest) (*ListPlaylistsReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListPlaylists not implemented")
+}
+func (UnimplementedOrcaServer) Health(context.Context, *emptypb.Empty) (*emptypb.Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Health not implemented")
 }
 func (UnimplementedOrcaServer) mustEmbedUnimplementedOrcaServer() {}
 
@@ -537,6 +551,24 @@ func _Orca_ListPlaylists_Handler(srv interface{}, ctx context.Context, dec func(
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Orca_Health_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrcaServer).Health(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/orca.Orca/Health",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrcaServer).Health(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Orca_ServiceDesc is the grpc.ServiceDesc for Orca service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -603,6 +635,10 @@ var Orca_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListPlaylists",
 			Handler:    _Orca_ListPlaylists_Handler,
+		},
+		{
+			MethodName: "Health",
+			Handler:    _Orca_Health_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

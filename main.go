@@ -1075,6 +1075,10 @@ func (o *orcaServer) getPlaylistPreview(
 	return playlistTracks, playlistN, nil
 }
 
+func (o *orcaServer) Health(_ context.Context, _ *emptypb.Empty) (*emptypb.Empty, error) {
+	return &emptypb.Empty{}, nil
+}
+
 func (o *orcaServer) queueStartResync(ctx context.Context, guild *models.RemoteGuild, botID, channelID string) error {
 	if guild.ChannelID != channelID {
 		guild.ChannelID = channelID
