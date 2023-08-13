@@ -799,6 +799,7 @@ func (o *orcaServer) Remove(ctx context.Context, in *pb.RemoveRequest) (*emptypb
 		return nil, ErrInternal
 	}
 
+	//goland:noinspection GoBoolExpressions // goland is crazy thinking this is always true
 	if position == 0 {
 		err = o.sendResync(ctx, bot.ID, guild.ID, ResyncTargetCurrent)
 		if err != nil {
@@ -1307,6 +1308,13 @@ func (o *orcaServer) handleKeyDel(ctx context.Context, logger *zap.SugaredLogger
 	}
 
 	val = strings.TrimPrefix(val, pref)
+
+	_, exists := o.states.Load(val)
+	if exists {
+		logger.Fatalf("Own managed state %s expired", val) // TODO: gracefully remove this state?
+
+		return nil // never reached because logger.Fatal calls os.Exit, more of an IDE/linter hint
+	}
 
 	logger.Infof("Lock for %s expired, trying takeover", val)
 
