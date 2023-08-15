@@ -671,7 +671,7 @@ func (o *orcaServer) GetTracks(ctx context.Context, in *pb.GetTracksRequest) (*p
 		Model(&tracks).
 		Where("bot_id = ?", bot.ID).
 		Where("guild_id = ?", guild.ID).
-		ColumnExpr("COUNT(duration)")
+		ColumnExpr("COUNT(*)")
 
 	// subtract position of every track if queue is not looping, because we want remaining duration
 	if guild.Loop {
@@ -912,7 +912,7 @@ func (o *orcaServer) ListPlaylists(ctx context.Context, in *pb.ListPlaylistsRequ
 				NewSelect().
 				Model((*models.PlaylistTrack)(nil)).
 				Where("playlist_id = playlists.id").
-				ColumnExpr("COUNT(duration)"),
+				ColumnExpr("COUNT(*)"),
 		).
 		ColumnExpr("(?) AS total_duration",
 			o.store.
