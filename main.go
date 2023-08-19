@@ -460,10 +460,14 @@ func (o *orcaServer) addTracks(
 		return nil, 0, false, errorx.Decorate(err, "get remote tracks")
 	}
 
-	qlen, err := guild.TracksQuery(o.store).Count(ctx)
+	var qlen int
+
+	err = guild.TracksQuery(o.store).ColumnExpr("COUNT(*)").Scan(ctx, &qlen)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, 0, false, errorx.Decorate(err, "count tracks")
 	}
+
+	o.logger.Debugf("Current queue length: %d", qlen)
 
 	if qlen+len(tracks) > queueSizeLimit {
 		return nil, 0, false, ErrQueueTooLarge
