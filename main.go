@@ -1346,8 +1346,8 @@ func (o *orcaServer) chooseOrdKeyRange(ctx context.Context, qlen, position int) 
 		Model((*models.RemoteTrack)(nil)).
 		Column("ord_key").
 		Order("ord_key").
-		Offset(position). // have a separate check for position 0 later
-		Limit(2).         //nolint:gomnd // previous and next track in theory
+		Offset(max(position-1, 0)). // have a separate check for position 0 later
+		Limit(2).                   //nolint:gomnd // previous and next track in theory
 		Rows(ctx)
 	if err != nil {
 		o.logger.Errorf("Error getting ordkeys from store: %+v", err)
