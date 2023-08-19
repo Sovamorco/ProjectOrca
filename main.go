@@ -460,20 +460,16 @@ func (o *orcaServer) addTracks(
 		return nil, 0, false, errorx.Decorate(err, "get remote tracks")
 	}
 
-	var qlen int
-
-	err = guild.TracksQuery(o.store).ColumnExpr("COUNT(*)").Scan(ctx, &qlen)
+	qlen, err := guild.TracksQuery(o.store).Count(ctx)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, 0, false, errorx.Decorate(err, "count tracks")
 	}
-
-	o.logger.Debugf("Current queue length: %d", qlen)
 
 	if qlen+len(tracks) > queueSizeLimit {
 		return nil, 0, false, ErrQueueTooLarge
 	}
 
-	prevOrdKey, nextOrdKey, affectedFirst := o.chooseOrdKeyRange(ctx, qlen, position)
+	prevOrdKey, nextOrdKey, affectedFirst := o.chooseOrdKeyRange(ctx, guild, qlen, position)
 
 	models.SetOrdKeys(tracks, prevOrdKey, nextOrdKey)
 
@@ -629,14 +625,8 @@ func (o *orcaServer) ShuffleQueue(ctx context.Context, in *pb.GuildOnlyRequest) 
 		ModelTableExpr("tracks").
 		TableExpr(
 			"(?) AS curr",
-			o.store.
-				NewSelect().
-				Model((*models.RemoteTrack)(nil)).
-				Column("id", "ord_key").
-				Where("bot_id = ?", bot.ID).
-				Where("guild_id = ?", guild.ID).
-				Order("ord_key").
-				Limit(1),
+			guild.CurrentTrackQuery(o.store).
+				Column("id", "ord_key"),
 		).
 		Set("ord_key = RANDOM() * ? + 1 + curr.ord_key", edgeOrdKeyDiff).
 		Where("bot_id = ?", bot.ID).
@@ -1330,7 +1320,9 @@ func (o *orcaServer) handleKeyDel(ctx context.Context, logger *zap.SugaredLogger
 	return nil
 }
 
-func (o *orcaServer) chooseOrdKeyRange(ctx context.Context, qlen, position int) (float64, float64, bool) {
+func (o *orcaServer) chooseOrdKeyRange(
+	ctx context.Context, guild *models.RemoteGuild, qlen, position int,
+) (float64, float64, bool) {
 	// special case - if no tracks in queue - insert all tracks with ordkeys from 0 to 100
 	if qlen == 0 {
 		return defaultPrevOrdKey, defaultNextOrdKey, true
@@ -1345,9 +1337,7 @@ func (o *orcaServer) chooseOrdKeyRange(ctx context.Context, qlen, position int) 
 	// position has to be at least 0 and at most len(queue)
 	position = max(0, min(qlen, position))
 
-	rows, err := o.store.
-		NewSelect().
-		Model((*models.RemoteTrack)(nil)).
+	rows, err := guild.TracksQuery(o.store).
 		Column("ord_key").
 		Order("ord_key").
 		Offset(max(position-1, 0)). // have a separate check for position 0 later
