@@ -157,6 +157,11 @@ func (y *YTDL) getYTDLPOutput(args ...string) ([]byte, error) {
 		return nil, errorx.Decorate(err, "get ytdlp stdout pipe")
 	}
 
+	stderr, err := ytdlp.StderrPipe()
+	if err != nil {
+		return nil, errorx.Decorate(err, "get ytdlp stderr pipe")
+	}
+
 	err = ytdlp.Start()
 	if err != nil {
 		return nil, errorx.Decorate(err, "start ytdlp")
@@ -164,11 +169,18 @@ func (y *YTDL) getYTDLPOutput(args ...string) ([]byte, error) {
 
 	jsonB, err := io.ReadAll(stdout)
 	if err != nil {
-		return nil, errorx.Decorate(err, "read Stream url")
+		return nil, errorx.Decorate(err, "read ytdlp output")
+	}
+
+	errlog, err := io.ReadAll(stderr)
+	if err != nil {
+		return nil, errorx.Decorate(err, "read ytdlp error output")
 	}
 
 	err = ytdlp.Wait()
 	if err != nil {
+		y.logger.Errorf("YTDLP stderr:\n%s", string(errlog))
+
 		return nil, errorx.Decorate(err, "wait for ytdlp")
 	}
 
