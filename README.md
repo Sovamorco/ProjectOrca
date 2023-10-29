@@ -6,6 +6,8 @@ Highly involved, language-independent, resilient and relatively thin server for 
 
 Orca uses gRPC and [Protocol Buffers](https://protobuf.dev/) for client-server communication. That means you can generate client files by running `protoc` for your specific language.
 
+You can see generic overview of possible functions in `proto/orca.proto`.
+
 Taskfile includes protoc command for Python: `task proto:python`, which generates Python files in `proto_python` directory.
 
 ## Development
@@ -55,3 +57,9 @@ spotify:
   client_id: <YOUR_CLIENT_ID>
   client_secret: <YOUR_CLIENT_SECRET>
 ```
+
+## Features
+
+- **High availability** - you can run multiple instances of the bot and they will automatically substitute each other in case any of them fail
+- **Voice conneciton management** - bot manages voice connections for you, giving you simple controls for connecting/disconnecting
+- **Multitude of sources** - bot supports any source that can be fetched by [yt-dlp](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md) and any format that can be processed by [ffmpeg](https://ffmpeg.org/ffmpeg-formats.html), which sums up to pretty much anything in existence
