@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"time"
 
 	"github.com/joomcode/errorx"
@@ -119,9 +120,9 @@ func (t *Track) startStream() error {
 		"-filter:a", "dynaudnorm=p=0.9:r=0.9",
 		"-acodec", "libopus",
 		"-f", "data",
-		"-ar", fmt.Sprint(sampleRate),
-		"-ac", fmt.Sprint(channels),
-		"-b:a", fmt.Sprint(bitrate),
+		"-ar", strconv.Itoa(sampleRate),
+		"-ac", strconv.Itoa(channels),
+		"-b:a", strconv.Itoa(bitrate),
 		"-vbr", "off",
 		"pipe:1",
 	)

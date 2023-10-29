@@ -6,6 +6,7 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"net"
+	"strconv"
 	"sync"
 	"time"
 
@@ -63,7 +64,7 @@ func (s *DBConfig) getConnString() string {
 		"postgres://%s:%s@%s/%s?sslmode=%s",
 		s.Username,
 		s.Password,
-		net.JoinHostPort(s.Host, fmt.Sprint(s.Port)),
+		net.JoinHostPort(s.Host, strconv.Itoa(s.Port)),
 		s.DB,
 		sslmode,
 	)
@@ -79,7 +80,7 @@ type RedisConfig struct {
 
 func (r *RedisConfig) getOptions() *redis.Options {
 	return &redis.Options{ //nolint:exhaustruct
-		Addr:     net.JoinHostPort(r.Host, fmt.Sprint(r.Port)),
+		Addr:     net.JoinHostPort(r.Host, strconv.Itoa(r.Port)),
 		Username: r.Username,
 		Password: r.Password,
 	}
@@ -98,6 +99,8 @@ type Store struct {
 func getDBConfig(ctx context.Context, config *DBConfig, vc *vault.Client) (*DBConfig, error) {
 	if config.RoleName == "" {
 		return config, nil
+	} else if vc == nil {
+		return nil, errorx.IllegalArgument.New("no vault client passed to vault-interpolated database config")
 	}
 
 	res, err := vc.Secrets.DatabaseGenerateCredentials(ctx, config.RoleName, vault.WithMountPath(databaseMountPath))

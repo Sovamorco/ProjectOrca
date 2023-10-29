@@ -26,6 +26,7 @@ import (
 	"github.com/go-redsync/redsync/v4"
 
 	"ProjectOrca/extractor"
+
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"ProjectOrca/migrations"
@@ -1110,15 +1111,13 @@ func main() {
 
 	var config *Config
 
-	if os.Getenv("PRODUCTION") == "true" {
-		vc, err = gvault.ClientFromEnv(ctx)
-		if err != nil {
-			logger.Fatalf("Error creating vault client: %+v", err)
-		}
+	vc, err = gvault.ClientFromEnv(ctx)
+	if err != nil {
+		logger.Debugf("Failed to create vault client: %+v", err)
 
-		config, err = loadConfig(ctx, vc)
+		config, err = loadConfig(ctx)
 	} else {
-		config, err = loadConfigDev(ctx)
+		config, err = loadConfigVault(ctx, vc)
 	}
 
 	if err != nil {

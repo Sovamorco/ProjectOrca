@@ -1,0 +1,57 @@
+# Orca
+
+Highly involved, language-independent, resilient and relatively thin server for Discord music playback written in Go.
+
+## Client
+
+Orca uses gRPC and [Protocol Buffers](https://protobuf.dev/) for client-server communication. That means you can generate client files by running `protoc` for your specific language.
+
+Taskfile includes protoc command for Python: `task proto:python`, which generates Python files in `proto_python` directory.
+
+## Development
+
+This project uses [Task](https://taskfile.dev) to run most common tasks locally.
+
+Local development environment requires Redis and Postgres to be running with credentials specified in `config.dev.yaml`.
+
+To run the server - just do `task run`.
+
+## Production
+
+Running in docker is recommended.
+
+To operate Orca requires Redis, Postgres and, optionally, Vault to be running (Vault required for credential storage and rotating database credentials).
+
+### Configuration
+
+Config structure can be seen in `config.dev.yaml` or in `config.go`.
+
+To change the config, either build the docker image with a custom config:
+
+```
+FROM orca:latest
+COPY config.yaml /src/config.yaml
+```
+
+Or mount the config to `/src/config.yaml` in the container.
+
+## Optional modules
+
+Orca provides optional VK and Spotify playback, both of which require credentials.
+
+### VK
+
+To enable VK playback, config should contain token with audio.get permissions:
+```
+vk:
+  token: <YOUR_TOKEN>
+```
+
+### Spotify
+
+To enable Spotify playback, config should contain ClientID and ClientSecret for a [Spotify app](https://developer.spotify.com/documentation/web-api/concepts/apps):
+```
+spotify:
+  client_id: <YOUR_CLIENT_ID>
+  client_secret: <YOUR_CLIENT_SECRET>
+```

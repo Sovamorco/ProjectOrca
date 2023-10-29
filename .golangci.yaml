@@ -15,6 +15,7 @@ linters:
   - varnamelen
   - depguard
   - godox
+  - protogetter # I do not agree with it
   - goimports # conflicts with gofumpt
   - gci       # conflicts with gofumpt
   - gofumpt   # broken, just run task fmt

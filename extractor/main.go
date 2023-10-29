@@ -24,11 +24,11 @@ type TrackData struct {
 }
 
 type Extractor interface {
-	QueryMatches(context.Context, string) bool
-	ExtractTracksData(context.Context, string) ([]TrackData, error)
+	QueryMatches(ctx context.Context, query string) bool
+	ExtractTracksData(ctx context.Context, url string) ([]TrackData, error)
 
-	ExtractionURLMatches(context.Context, string) bool
-	ExtractStreamURL(context.Context, string) (string, time.Duration, error)
+	ExtractionURLMatches(ctx context.Context, url string) bool
+	ExtractStreamURL(ctx context.Context, url string) (string, time.Duration, error)
 }
 
 type Extractors struct {

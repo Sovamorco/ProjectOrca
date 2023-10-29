@@ -26,7 +26,7 @@ tasks:
       Dependencies:
       - "gofumpt" - `go install mvdan.cc/gofumpt@latest`
     cmds:
-    - gofumpt -l -w .
+    - gofumpt -l -w extractor healthcheck migrations models spotify store utils vk ytdl config.go main.go
 
   lint:
     desc:    This task runs go lint tool on the whole project
@@ -37,16 +37,24 @@ tasks:
     cmds:
     - golangci-lint run -v {{.CLI_ARGS}}
 
-  proto:
-    desc:    This task runs protobuf generator for proto files in proto directory
+  proto:go:
+    desc:    This task runs Go protobuf generator for proto files in proto directory
     summary: |
-      This task runs protobuf generator for proto files in proto directory
+      This task runs Go protobuf generator for proto files in proto directory
       Dependencies:
       - "protoc" (https://grpc.io/docs/protoc-installation/)
       - "protoc-gen-go" and "protoc-gen-go-grpc" (https://grpc.io/docs/languages/go/quickstart/)
-      - "go-proto-validators" (https://github.com/mwitkow/go-proto-validators#installing-and-using)
     cmds:
     - protoc --go_out=paths=source_relative:. --go-grpc_out=paths=source_relative:. proto/orca.proto
+
+  proto:python:
+    desc:    This task runs Python protobuf generator for proto files in proto directory
+    summary: |
+      This task runs Python protobuf generator for proto files in proto directory
+      Dependencies:
+      - "protoc" (https://grpc.io/docs/protoc-installation/)
+    cmds:
+    - python -m grpc_tools.protoc --proto_path=proto --python_out=proto_python --pyi_out=proto_python --grpc_python_out=proto_python proto/orca.proto
 
   protoall:
     desc:    This task runs protobuf generator for proto files in proto directory for all related projects
@@ -55,7 +63,15 @@ tasks:
       Dependencies:
       - "protoc" (https://grpc.io/docs/protoc-installation/)
       - "protoc-gen-go" and "protoc-gen-go-grpc" (https://grpc.io/docs/languages/go/quickstart/)
-      - "go-proto-validators" (https://github.com/mwitkow/go-proto-validators#installing-and-using)
     cmds:
-    - task: proto
-    - python -m grpc_tools.protoc --proto_path=proto --python_out=../RaccoonBot --pyi_out=../RaccoonBot --grpc_python_out=../RaccoonBot proto/orca.proto
+    - task: proto:go
+    - task: proto:python
+
+  run:
+    desc:    This task runs the server locally
+    summary: |
+      This task runs the server locally
+      Dependencies:
+      - "go" has to be in PATH
+    cmds:
+    - go run .

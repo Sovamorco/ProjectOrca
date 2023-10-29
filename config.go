@@ -33,7 +33,7 @@ type Config struct {
 	Redis   store.RedisConfig `mapstructure:"redis"`
 }
 
-func loadConfigDev(ctx context.Context) (*Config, error) {
+func loadConfig(ctx context.Context) (*Config, error) {
 	var res Config
 
 	err := config.LoadConfig(ctx, configNameDev, &res)
@@ -44,7 +44,7 @@ func loadConfigDev(ctx context.Context) (*Config, error) {
 	return &res, nil
 }
 
-func loadConfig(ctx context.Context, vc *vault.Client) (*Config, error) {
+func loadConfigVault(ctx context.Context, vc *vault.Client) (*Config, error) {
 	var res Config
 
 	err := config.LoadConfigVault(ctx, vc, configName, &res)
