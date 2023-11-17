@@ -12,7 +12,7 @@ require (
 	github.com/lib/pq v1.10.9
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/redis/go-redis/v9 v9.2.1
-	github.com/sovamorco/gommon v0.0.0-20230727091758-a61f596af755
+	github.com/sovamorco/gommon v0.0.0-20231117110945-e7a8dc197337
 	github.com/uptrace/bun v1.1.16
 	github.com/uptrace/bun/dialect/pgdialect v1.1.16
 	github.com/zmb3/spotify/v2 v2.4.0

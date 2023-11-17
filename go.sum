@@ -183,8 +183,8 @@ github.com/redis/rueidis v1.0.19/go.mod h1:8B+r5wdnjwK3lTFml5VtxjzGOQAC+5UmujoD1
 github.com/rogpeppe/go-internal v1.3.0/go.mod h1:M8bDsm7K2OlrFYOpmOWEs/qY81heoFRclV5y23lUDJ4=
 github.com/ryanuber/go-glob v1.0.0 h1:iQh3xXAumdQ+4Ufa5b25cRpC5TYKlno6hsv6Cb3pkBk=
 github.com/ryanuber/go-glob v1.0.0/go.mod h1:807d1WSdnB0XRJzKNil9Om6lcp/3a0v4qIHxIXzX/Yc=
-github.com/sovamorco/gommon v0.0.0-20230727091758-a61f596af755 h1:5noddt0YnZBf5aOOrQMtlCoBwC44I6MVlbfL5TtziCc=
-github.com/sovamorco/gommon v0.0.0-20230727091758-a61f596af755/go.mod h1:niJdCpYVzlzmuB0+uoE2+opfwGnaTktnPwGvzdKPcbg=
+github.com/sovamorco/gommon v0.0.0-20231117110945-e7a8dc197337 h1:0ev3pykEN4NqGfysyqWvKrC7O0x2Ww5pMn98uHXUp58=
+github.com/sovamorco/gommon v0.0.0-20231117110945-e7a8dc197337/go.mod h1:niJdCpYVzlzmuB0+uoE2+opfwGnaTktnPwGvzdKPcbg=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
 github.com/stretchr/objx v0.4.0/go.mod h1:YvHI0jy2hoMjB+UWwv71VJQ9isScKT/TqJzVSSt89Yw=
 github.com/stretchr/objx v0.5.0/go.mod h1:Yh+to48EsGEfYuaHDzXPcE3xhTkx73EhmCGUpEOglKo=
