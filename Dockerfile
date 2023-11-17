@@ -1,7 +1,7 @@
-FROM golang:1.21-rc-alpine AS builder
+FROM golang:1.21-alpine AS builder
 LABEL stage=builder
 
-RUN apk add build-base git
+RUN apk add --no-cache build-base git
 
 WORKDIR /src
 
@@ -38,11 +38,14 @@ RUN adduser \
     --uid "${UID}" \
     "${USER}"
 
-RUN apk add ffmpeg yt-dlp opus opus-dev
+RUN apk add --no-cache ffmpeg opus opus-dev
 
 WORKDIR /src
 COPY --from=builder /src/bin/ ./bin
 COPY config.yaml ./
+
+# don't want to cache yt-dlp specifically so put it here
+RUN apk add --no-cache yt-dlp
 
 ENV ORCA_HEALTH_ADDRESS=localhost:8590
 
