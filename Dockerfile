@@ -8,17 +8,7 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 
-COPY extractor extractor
-COPY healthcheck healthcheck
-COPY migrations migrations
-COPY models models
-COPY proto proto
-COPY spotify spotify
-COPY store store
-COPY utils utils
-COPY vk vk
-COPY ytdl ytdl
-COPY main.go config.go ./
+COPY . .
 
 RUN go mod vendor && go mod verify
 RUN GOOS=linux GOARCH=amd64 GOMAXPROCS=1 go build -gcflags="all=-c=1" -ldflags="-w -s" -o /src/bin/healthcheck ./healthcheck
