@@ -120,8 +120,8 @@ func (y *YTDL) getTracksData(query string) ([]TrackData, error) {
 	}
 
 	var vd SearchData
-	err = json.Unmarshal(jsonB, &vd)
 
+	err = json.Unmarshal(jsonB, &vd)
 	if err != nil {
 		return nil, errorx.Decorate(err, "unmarshal ytdl output")
 	}
@@ -134,6 +134,7 @@ func (y *YTDL) getTracksData(query string) ([]TrackData, error) {
 		if len(vd.Entries) < 1 {
 			return nil, extractor.ErrNoResults
 		}
+
 		ad = vd.Entries
 	}
 

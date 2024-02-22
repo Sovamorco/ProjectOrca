@@ -26,7 +26,7 @@ tasks:
       Dependencies:
       - "gofumpt" - `go install mvdan.cc/gofumpt@latest`
     cmds:
-    - gofumpt -l -w extractor healthcheck migrations models spotify store utils vk ytdl config.go main.go
+    - gofumpt -l -w extractor healthcheck migrations models service spotify store utils vk ytdl main.go
 
   lint:
     desc:    This task runs go lint tool on the whole project
@@ -35,6 +35,7 @@ tasks:
       Dependencies:
       - "golangci-lint" - (https://golangci-lint.run/usage/install/#local-installation)
     cmds:
+    - task: fmt
     - golangci-lint run -v {{.CLI_ARGS}}
 
   proto:go:
@@ -56,7 +57,7 @@ tasks:
     cmds:
     - python -m grpc_tools.protoc --proto_path=proto --python_out=proto_python --pyi_out=proto_python --grpc_python_out=proto_python proto/orca.proto
 
-  protoall:
+  proto:
     desc:    This task runs protobuf generator for proto files in proto directory for all related projects
     summary: |
       This task runs protobuf generator for proto files in proto directory

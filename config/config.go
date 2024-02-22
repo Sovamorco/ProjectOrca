@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"context"
@@ -33,7 +33,7 @@ type Config struct {
 	Redis   store.RedisConfig `mapstructure:"redis"`
 }
 
-func loadConfig(ctx context.Context) (*Config, error) {
+func LoadConfig(ctx context.Context) (*Config, error) {
 	var res Config
 
 	err := config.LoadConfig(ctx, configNameDev, &res)
@@ -44,7 +44,7 @@ func loadConfig(ctx context.Context) (*Config, error) {
 	return &res, nil
 }
 
-func loadConfigVault(ctx context.Context, vc *vault.Client) (*Config, error) {
+func LoadConfigVault(ctx context.Context, vc *vault.Client) (*Config, error) {
 	var res Config
 
 	err := config.LoadConfigVault(ctx, vc, configName, &res)

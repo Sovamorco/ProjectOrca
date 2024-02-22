@@ -6,22 +6,23 @@ import "google/protobuf/duration.proto";
 import "google/protobuf/empty.proto";
 
 service Orca {
-  rpc Join (JoinRequest) returns (google.protobuf.Empty) {}
-  rpc Leave (GuildOnlyRequest) returns (google.protobuf.Empty) {}
-  rpc Play (PlayRequest) returns (PlayReply) {}
-  rpc Skip (GuildOnlyRequest) returns (google.protobuf.Empty) {}
-  rpc Stop (GuildOnlyRequest) returns (google.protobuf.Empty) {}
-  rpc Seek (SeekRequest) returns (SeekReply) {}
-  rpc GetTracks (GetTracksRequest) returns (GetTracksReply) {}
-  rpc Pause (GuildOnlyRequest) returns (google.protobuf.Empty) {}
-  rpc Resume (GuildOnlyRequest) returns (google.protobuf.Empty) {}
-  rpc Loop (GuildOnlyRequest) returns (google.protobuf.Empty) {}
+  rpc Join(JoinRequest) returns (google.protobuf.Empty) {}
+  rpc Leave(GuildOnlyRequest) returns (google.protobuf.Empty) {}
+  rpc Play(PlayRequest) returns (PlayReply) {}
+  rpc Skip(GuildOnlyRequest) returns (google.protobuf.Empty) {}
+  rpc Stop(GuildOnlyRequest) returns (google.protobuf.Empty) {}
+  rpc Seek(SeekRequest) returns (SeekReply) {}
+  rpc GetTracks(GetTracksRequest) returns (GetTracksReply) {}
+  rpc Pause(GuildOnlyRequest) returns (google.protobuf.Empty) {}
+  rpc Resume(GuildOnlyRequest) returns (google.protobuf.Empty) {}
+  rpc Loop(GuildOnlyRequest) returns (google.protobuf.Empty) {}
   rpc ShuffleQueue(GuildOnlyRequest) returns (google.protobuf.Empty) {}
   rpc Remove(RemoveRequest) returns (google.protobuf.Empty) {}
   rpc SavePlaylist(SavePlaylistRequest) returns (google.protobuf.Empty) {}
   rpc LoadPlaylist(LoadPlaylistRequest) returns (PlayReply) {}
   rpc ListPlaylists(ListPlaylistsRequest) returns (ListPlaylistsReply) {}
   rpc Health(google.protobuf.Empty) returns (google.protobuf.Empty) {}
+  rpc Subscribe(google.protobuf.Empty) returns (stream QueueChangeNotification) {} // bot-level subscription
 }
 
 message JoinRequest {
@@ -49,9 +50,7 @@ message TrackData {
   google.protobuf.Duration duration = 5;
 }
 
-message GuildOnlyRequest {
-  string guildID = 1;
-}
+message GuildOnlyRequest { string guildID = 1; }
 
 message SeekRequest {
   string guildID = 1;
@@ -70,7 +69,8 @@ message GetTracksReply {
   repeated TrackData tracks = 1;
   int64 totalTracks = 2;
   bool looping = 3;
-  google.protobuf.Duration remaining = 4;
+  bool paused = 4;
+  google.protobuf.Duration remaining = 5;
 }
 
 message RemoveRequest {
@@ -95,13 +95,16 @@ message ListPlaylistsRequest {
   string userID = 2;
 }
 
-message ListPlaylistsReply {
-  repeated Playlist playlists = 1;
-}
+message ListPlaylistsReply { repeated Playlist playlists = 1; }
 
 message Playlist {
   string id = 1;
   string name = 2;
   int64 totalTracks = 3;
   google.protobuf.Duration totalDuration = 4;
+}
+
+message QueueChangeNotification {
+  string bot = 1;
+  string guild = 2;
 }

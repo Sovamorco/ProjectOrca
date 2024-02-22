@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"time"
 
+	"ProjectOrca/models/notifications"
+
 	"github.com/joomcode/errorx"
 )
 
@@ -247,6 +249,8 @@ func (t *Track) stop(ctx context.Context) error {
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return errorx.Decorate(err, "delete or requeue track")
 	}
+
+	notifications.SendQueueNotificationLog(ctx, t.g.logger, t.g.store, t.g.botID, t.g.id)
 
 	return nil
 }

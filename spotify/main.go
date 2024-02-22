@@ -18,7 +18,7 @@ import (
 
 	"github.com/joomcode/errorx"
 	"github.com/zmb3/spotify/v2"
-	"github.com/zmb3/spotify/v2/auth"
+	spotifyauth "github.com/zmb3/spotify/v2/auth"
 	"golang.org/x/oauth2/clientcredentials"
 )
 
@@ -255,8 +255,6 @@ func (s *Spotify) getPlaylistItemsIter(ctx context.Context, id spotify.ID) ([]sp
 	var eg multierror.Group
 
 	for pagenum := range pages {
-		pagenum := pagenum
-
 		eg.Go(func() error {
 			s.RLock()
 			page, err := s.client.GetPlaylistItems(
@@ -342,5 +340,5 @@ func getTrackDisplayURL(track spotify.SimpleTrack) string {
 }
 
 func getExtractionURL(title string) string {
-	return fmt.Sprintf("https://www.youtube.com/results?search_query=%s", title)
+	return "https://www.youtube.com/results?search_query=" + title
 }

@@ -157,7 +157,7 @@ func NewStore(ctx context.Context, logger *zap.SugaredLogger, config *Config, vc
 	}
 }
 
-func (s *Store) GracefulShutdown(ctx context.Context) {
+func (s *Store) Shutdown(ctx context.Context) {
 	s.logger.Info("Shutting down")
 
 	s.doShutdownFuncs(ctx)
@@ -179,8 +179,6 @@ func (s *Store) Unsubscribe(ctx context.Context) {
 	var wg sync.WaitGroup
 
 	for _, f := range s.unsubscribeFuncs {
-		f := f
-
 		wg.Add(1)
 
 		go func() {
@@ -196,12 +194,11 @@ func (s *Store) doShutdownFuncs(ctx context.Context) {
 	var wg sync.WaitGroup
 
 	for _, f := range s.shutdownFuncs {
-		f := f
-
 		wg.Add(1)
 
 		go func() {
 			defer wg.Done()
+
 			f(ctx)
 		}()
 	}

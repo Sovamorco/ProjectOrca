@@ -63,7 +63,7 @@ func startSession(token string) (*discordgo.Session, error) {
 	return s, nil
 }
 
-func (b *Bot) GracefulShutdown() {
+func (b *Bot) Shutdown() {
 	var wg sync.WaitGroup
 
 	b.guilds.Range(func(_, value any) bool {
@@ -168,8 +168,6 @@ func (b *Bot) ResyncGuilds(ctx context.Context) error {
 	var eg multierror.Group
 
 	for _, guild := range guilds {
-		guild := guild
-
 		eg.Go(func() error {
 			return b.resyncGuild(ctx, guild)
 		})

@@ -133,7 +133,7 @@ func (v *VK) extractTrackData(ctx context.Context, matches []string) ([]extracto
 	}
 
 	if len(matches) >= 4 { //nolint:gomnd // no comment
-		body["audios"] += fmt.Sprintf("_%s", matches[3])
+		body["audios"] += "_" + matches[3]
 	}
 
 	var res APIAudioGetByIDResponse
@@ -213,7 +213,7 @@ func tracksToData(tracks []Track) []extractor.TrackData {
 
 		res[i] = extractor.TrackData{
 			Title:         title,
-			ExtractionURL: fmt.Sprintf("ytsearch:%s", title), // in case stream url fails
+			ExtractionURL: "ytsearch:" + title, // in case stream url fails
 			DisplayURL:    fmt.Sprintf("https://vk.com/audio%d_%d", item.OwnerID, item.ID),
 			StreamURL:     item.URL,
 			Live:          false,

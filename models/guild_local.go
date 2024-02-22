@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"ProjectOrca/extractor"
+	"ProjectOrca/models/notifications"
 
 	"ProjectOrca/store"
 
@@ -212,6 +213,8 @@ func (g *Guild) playLoopPreconditions(ctx context.Context, track *Track) error {
 		return ErrShuttingDown
 	case <-g.resyncPlaying:
 		track.clean()
+
+		notifications.SendQueueNotificationLog(ctx, g.logger, g.store, g.botID, g.id)
 	default:
 	}
 

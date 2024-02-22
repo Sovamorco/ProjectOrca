@@ -33,8 +33,21 @@ func (s *Store) subscriptionHandler(ctx context.Context, mh MessageHandler, ch <
 
 	var wg sync.WaitGroup
 
-	for msg := range ch {
-		msg := msg
+	var msg *redis.Message
+
+	var ok bool
+
+loop:
+	for {
+		select {
+		case <-ctx.Done():
+			break loop
+		case msg, ok = <-ch:
+			if !ok {
+				break loop
+			}
+		}
+
 		logger := logger.With("channel", msg.Channel)
 
 		wg.Add(1)
@@ -66,17 +79,9 @@ func (s *Store) Lock(ctx context.Context, key string) error {
 		return errorx.Decorate(err, "lock")
 	}
 
-	cancel := make(chan struct{}, 1)
-
-	go s.extendLoop(ctx, mu, cancel)
+	go s.extendLoop(ctx, mu)
 
 	s.shutdownFuncs = append(s.shutdownFuncs, func(ctx context.Context) {
-		// make sure this does not lock
-		select {
-		case cancel <- struct{}{}:
-		default:
-		}
-
 		_, err := mu.UnlockContext(ctx)
 		if err != nil {
 			s.logger.Errorf("Error unlocking state: %+v", err)
@@ -86,7 +91,7 @@ func (s *Store) Lock(ctx context.Context, key string) error {
 	return nil
 }
 
-func (s *Store) extendLoop(ctx context.Context, mu *redsync.Mutex, cancel chan struct{}) {
+func (s *Store) extendLoop(ctx context.Context, mu *redsync.Mutex) {
 	ticker := time.NewTicker(lockExtendFrequency)
 	defer ticker.Stop()
 
@@ -97,7 +102,7 @@ func (s *Store) extendLoop(ctx context.Context, mu *redsync.Mutex, cancel chan s
 		}
 
 		select {
-		case <-cancel:
+		case <-ctx.Done():
 			return
 		case <-ticker.C:
 		}
