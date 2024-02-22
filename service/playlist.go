@@ -8,6 +8,7 @@ import (
 
 	"ProjectOrca/extractor"
 	"ProjectOrca/models"
+	"ProjectOrca/models/notifications"
 	pb "ProjectOrca/proto"
 
 	"github.com/google/uuid"
@@ -145,6 +146,8 @@ func (o *Orca) LoadPlaylist(ctx context.Context, in *pb.LoadPlaylistRequest) (*p
 			return nil, err
 		}
 	}
+
+	notifications.SendQueueNotificationLog(ctx, o.logger, o.store, bot.ID, guild.ID)
 
 	return &pb.PlayReply{
 		Tracks: protoTracks,

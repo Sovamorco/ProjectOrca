@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"ProjectOrca/models"
+	"ProjectOrca/models/notifications"
 	pb "ProjectOrca/proto"
 
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -42,6 +43,8 @@ func (o *Orca) ShuffleQueue(ctx context.Context, in *pb.GuildOnlyRequest) (*empt
 
 		return nil, ErrInternal
 	}
+
+	notifications.SendQueueNotificationLog(ctx, o.logger, o.store, bot.ID, guild.ID)
 
 	return &emptypb.Empty{}, nil
 }

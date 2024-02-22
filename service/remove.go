@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"ProjectOrca/models"
+	"ProjectOrca/models/notifications"
 	pb "ProjectOrca/proto"
 
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -39,7 +40,6 @@ func (o *Orca) Remove(ctx context.Context, in *pb.RemoveRequest) (*emptypb.Empty
 		return nil, ErrInternal
 	}
 
-	//goland:noinspection GoBoolExpressions // goland is crazy thinking this is always true
 	if position == 0 {
 		err = o.sendResync(ctx, bot.ID, guild.ID, ResyncTargetCurrent)
 		if err != nil {
@@ -48,6 +48,8 @@ func (o *Orca) Remove(ctx context.Context, in *pb.RemoveRequest) (*emptypb.Empty
 			return nil, ErrInternal
 		}
 	}
+
+	notifications.SendQueueNotificationLog(ctx, o.logger, o.store, bot.ID, guild.ID)
 
 	return &emptypb.Empty{}, nil
 }

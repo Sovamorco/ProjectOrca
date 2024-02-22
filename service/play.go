@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"ProjectOrca/models"
+	"ProjectOrca/models/notifications"
 
 	pb "ProjectOrca/proto"
 
@@ -55,6 +56,8 @@ func (o *Orca) Play(ctx context.Context, in *pb.PlayRequest) (*pb.PlayReply, err
 			return nil, err
 		}
 	}
+
+	notifications.SendQueueNotificationLog(ctx, o.logger, o.store, bot.ID, guild.ID)
 
 	return &pb.PlayReply{
 		Tracks: tracksData,
