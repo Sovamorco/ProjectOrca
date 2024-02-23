@@ -20,6 +20,10 @@ import (
 const (
 	// after end of queue and before disconnecting wait for packetburst to hopefully be empty.
 	endQueueDisconnectDelay = packetBurstNum * frameSizeMs * time.Millisecond
+
+	// https://trac.ffmpeg.org/wiki/AudioVolume
+	// global volume factor for all streams.
+	volume = "0.7"
 )
 
 // Track is basically a wrapper for values commonly passed together - remote track, command, stream, packet.
@@ -120,6 +124,7 @@ func (t *Track) startStream() error {
 		"-i", t.remote.StreamURL,
 		"-map", "0:a",
 		"-filter:a", "dynaudnorm=p=0.9:r=0.9",
+		"-filter:a", "volume="+volume,
 		"-acodec", "libopus",
 		"-f", "data",
 		"-ar", strconv.Itoa(sampleRate),
