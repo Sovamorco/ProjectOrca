@@ -145,9 +145,9 @@ func (o *Orca) LoadPlaylist(ctx context.Context, in *pb.LoadPlaylistRequest) (*p
 		if err != nil {
 			return nil, err
 		}
+	} else {
+		go notifications.SendQueueNotificationLog(ctx, o.logger, o.store, bot.ID, guild.ID)
 	}
-
-	notifications.SendQueueNotificationLog(ctx, o.logger, o.store, bot.ID, guild.ID)
 
 	return &pb.PlayReply{
 		Tracks: protoTracks,

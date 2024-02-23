@@ -47,9 +47,9 @@ func (o *Orca) Remove(ctx context.Context, in *pb.RemoveRequest) (*emptypb.Empty
 
 			return nil, ErrInternal
 		}
+	} else {
+		go notifications.SendQueueNotificationLog(ctx, o.logger, o.store, bot.ID, guild.ID)
 	}
-
-	notifications.SendQueueNotificationLog(ctx, o.logger, o.store, bot.ID, guild.ID)
 
 	return &emptypb.Empty{}, nil
 }

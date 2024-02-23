@@ -250,7 +250,7 @@ func (t *Track) stop(ctx context.Context) error {
 		return errorx.Decorate(err, "delete or requeue track")
 	}
 
-	notifications.SendQueueNotificationLog(ctx, t.g.logger, t.g.store, t.g.botID, t.g.id)
+	go notifications.SendQueueNotificationLog(ctx, t.g.logger, t.g.store, t.g.botID, t.g.id)
 
 	return nil
 }
@@ -284,6 +284,7 @@ func (t *Track) checkForNextTrack(ctx context.Context) error {
 	case <-t.g.playLoopDone:
 		return ErrShuttingDown
 	case <-t.g.resyncPlaying:
+		go notifications.SendQueueNotificationLog(ctx, t.g.logger, t.g.store, t.g.botID, t.g.id)
 	}
 
 	return ErrNoTrack

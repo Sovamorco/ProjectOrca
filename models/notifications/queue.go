@@ -7,6 +7,7 @@ import (
 
 	"ProjectOrca/store"
 
+	"github.com/joomcode/errorx"
 	"go.uber.org/zap"
 )
 
@@ -23,26 +24,35 @@ type QueueNotificationMessage struct {
 	Guild string `json:"guild"`
 }
 
+func SendQueueNotification(
+	ctx context.Context,
+	store *store.Store,
+	botID string, guildID string,
+) error {
+	b, err := json.Marshal(QueueNotificationMessage{
+		Bot:   botID,
+		Guild: guildID,
+	})
+	if err != nil {
+		return errorx.Decorate(err, "marshal queue notification")
+	}
+
+	err = store.Publish(ctx, QueueNotificationChannelForBot(store.RedisPrefix, botID), b).Err()
+	if err != nil {
+		return errorx.Decorate(err, "publish queue notification")
+	}
+
+	return nil
+}
+
 func SendQueueNotificationLog(
 	ctx context.Context,
 	logger *zap.SugaredLogger,
 	store *store.Store,
 	botID string, guildID string,
 ) {
-	b, err := json.Marshal(QueueNotificationMessage{
-		Bot:   botID,
-		Guild: guildID,
-	})
+	err := SendQueueNotification(ctx, store, botID, guildID)
 	if err != nil {
-		logger.Errorf("Error marshalling queue notification message: %+v", err)
-
-		return
-	}
-
-	err = store.Publish(ctx, QueueNotificationChannelForBot(store.RedisPrefix, botID), b).Err()
-	if err != nil {
-		logger.Errorf("Error publishing queue notification: %+v", err)
-
-		return
+		logger.Errorf("Error sending queue notification: %+v", err)
 	}
 }

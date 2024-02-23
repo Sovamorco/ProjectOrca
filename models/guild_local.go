@@ -214,7 +214,7 @@ func (g *Guild) playLoopPreconditions(ctx context.Context, track *Track) error {
 	case <-g.resyncPlaying:
 		track.clean()
 
-		notifications.SendQueueNotificationLog(ctx, g.logger, g.store, g.botID, g.id)
+		go notifications.SendQueueNotificationLog(ctx, g.logger, g.store, g.botID, g.id)
 	default:
 	}
 

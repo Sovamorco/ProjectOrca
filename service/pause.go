@@ -34,7 +34,7 @@ func (o *Orca) Pause(ctx context.Context, in *pb.GuildOnlyRequest) (*emptypb.Emp
 		return nil, ErrInternal
 	}
 
-	notifications.SendQueueNotificationLog(ctx, o.logger, o.store, bot.ID, guild.ID)
+	go notifications.SendQueueNotificationLog(ctx, o.logger, o.store, bot.ID, guild.ID)
 
 	return &emptypb.Empty{}, nil
 }
@@ -64,7 +64,7 @@ func (o *Orca) Resume(ctx context.Context, in *pb.GuildOnlyRequest) (*emptypb.Em
 		return nil, ErrInternal
 	}
 
-	notifications.SendQueueNotificationLog(ctx, o.logger, o.store, bot.ID, guild.ID)
+	go notifications.SendQueueNotificationLog(ctx, o.logger, o.store, bot.ID, guild.ID)
 
 	return &emptypb.Empty{}, nil
 }

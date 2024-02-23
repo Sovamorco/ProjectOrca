@@ -55,9 +55,9 @@ func (o *Orca) Play(ctx context.Context, in *pb.PlayRequest) (*pb.PlayReply, err
 		if err != nil {
 			return nil, err
 		}
+	} else {
+		go notifications.SendQueueNotificationLog(ctx, o.logger, o.store, bot.ID, guild.ID)
 	}
-
-	notifications.SendQueueNotificationLog(ctx, o.logger, o.store, bot.ID, guild.ID)
 
 	return &pb.PlayReply{
 		Tracks: tracksData,
