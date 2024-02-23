@@ -23,7 +23,7 @@ const (
 
 	// https://trac.ffmpeg.org/wiki/AudioVolume
 	// global volume factor for all streams.
-	volume = "0.7"
+	volume = "0.5"
 )
 
 // Track is basically a wrapper for values commonly passed together - remote track, command, stream, packet.
