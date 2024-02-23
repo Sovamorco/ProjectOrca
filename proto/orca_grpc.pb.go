@@ -29,6 +29,7 @@ type OrcaClient interface {
 	Skip(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	Stop(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	Seek(ctx context.Context, in *SeekRequest, opts ...grpc.CallOption) (*SeekReply, error)
+	GetCurrent(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*GetCurrentReply, error)
 	GetTracks(ctx context.Context, in *GetTracksRequest, opts ...grpc.CallOption) (*GetTracksReply, error)
 	Pause(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	Resume(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
@@ -98,6 +99,15 @@ func (c *orcaClient) Stop(ctx context.Context, in *GuildOnlyRequest, opts ...grp
 func (c *orcaClient) Seek(ctx context.Context, in *SeekRequest, opts ...grpc.CallOption) (*SeekReply, error) {
 	out := new(SeekReply)
 	err := c.cc.Invoke(ctx, "/orca.Orca/Seek", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *orcaClient) GetCurrent(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*GetCurrentReply, error) {
+	out := new(GetCurrentReply)
+	err := c.cc.Invoke(ctx, "/orca.Orca/GetCurrent", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -236,6 +246,7 @@ type OrcaServer interface {
 	Skip(context.Context, *GuildOnlyRequest) (*emptypb.Empty, error)
 	Stop(context.Context, *GuildOnlyRequest) (*emptypb.Empty, error)
 	Seek(context.Context, *SeekRequest) (*SeekReply, error)
+	GetCurrent(context.Context, *GuildOnlyRequest) (*GetCurrentReply, error)
 	GetTracks(context.Context, *GetTracksRequest) (*GetTracksReply, error)
 	Pause(context.Context, *GuildOnlyRequest) (*emptypb.Empty, error)
 	Resume(context.Context, *GuildOnlyRequest) (*emptypb.Empty, error)
@@ -271,6 +282,9 @@ func (UnimplementedOrcaServer) Stop(context.Context, *GuildOnlyRequest) (*emptyp
 }
 func (UnimplementedOrcaServer) Seek(context.Context, *SeekRequest) (*SeekReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Seek not implemented")
+}
+func (UnimplementedOrcaServer) GetCurrent(context.Context, *GuildOnlyRequest) (*GetCurrentReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetCurrent not implemented")
 }
 func (UnimplementedOrcaServer) GetTracks(context.Context, *GetTracksRequest) (*GetTracksReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetTracks not implemented")
@@ -422,6 +436,24 @@ func _Orca_Seek_Handler(srv interface{}, ctx context.Context, dec func(interface
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(OrcaServer).Seek(ctx, req.(*SeekRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Orca_GetCurrent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GuildOnlyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrcaServer).GetCurrent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/orca.Orca/GetCurrent",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrcaServer).GetCurrent(ctx, req.(*GuildOnlyRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -657,6 +689,10 @@ var Orca_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Seek",
 			Handler:    _Orca_Seek_Handler,
+		},
+		{
+			MethodName: "GetCurrent",
+			Handler:    _Orca_GetCurrent_Handler,
 		},
 		{
 			MethodName: "GetTracks",

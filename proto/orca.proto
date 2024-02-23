@@ -12,6 +12,7 @@ service Orca {
   rpc Skip(GuildOnlyRequest) returns (google.protobuf.Empty) {}
   rpc Stop(GuildOnlyRequest) returns (google.protobuf.Empty) {}
   rpc Seek(SeekRequest) returns (SeekReply) {}
+  rpc GetCurrent(GuildOnlyRequest) returns (GetCurrentReply) {}
   rpc GetTracks(GetTracksRequest) returns (GetTracksReply) {}
   rpc Pause(GuildOnlyRequest) returns (google.protobuf.Empty) {}
   rpc Resume(GuildOnlyRequest) returns (google.protobuf.Empty) {}
@@ -22,7 +23,8 @@ service Orca {
   rpc LoadPlaylist(LoadPlaylistRequest) returns (PlayReply) {}
   rpc ListPlaylists(ListPlaylistsRequest) returns (ListPlaylistsReply) {}
   rpc Health(google.protobuf.Empty) returns (google.protobuf.Empty) {}
-  rpc Subscribe(google.protobuf.Empty) returns (stream QueueChangeNotification) {} // bot-level subscription
+  rpc Subscribe(google.protobuf.Empty)
+      returns (stream QueueChangeNotification) {} // bot-level subscription
 }
 
 message JoinRequest {
@@ -71,6 +73,12 @@ message GetTracksReply {
   bool looping = 3;
   bool paused = 4;
   google.protobuf.Duration remaining = 5;
+}
+
+message GetCurrentReply {
+  TrackData track = 1;
+  bool looping = 2;
+  bool paused = 3;
 }
 
 message RemoveRequest {

@@ -11,6 +11,7 @@ import (
 	"ProjectOrca/store"
 
 	pb "ProjectOrca/proto"
+
 	"github.com/google/uuid"
 	"github.com/joomcode/errorx"
 	"github.com/uptrace/bun"
@@ -71,6 +72,10 @@ func NewRemoteTracks(
 }
 
 func (t *RemoteTrack) ToProto() *pb.TrackData {
+	if t == nil {
+		return nil
+	}
+
 	return &pb.TrackData{
 		Title:      t.Title,
 		DisplayURL: t.DisplayURL,

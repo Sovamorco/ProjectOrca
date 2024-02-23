@@ -26,7 +26,7 @@ func (o *Orca) Loop(ctx context.Context, in *pb.GuildOnlyRequest) (*emptypb.Empt
 		return nil, ErrInternal
 	}
 
-	go notifications.SendQueueNotificationLog(ctx, o.logger, o.store, guild.BotID, guild.ID)
+	go notifications.SendQueueNotificationLog(context.WithoutCancel(ctx), o.logger, o.store, guild.BotID, guild.ID)
 
 	return &emptypb.Empty{}, nil
 }

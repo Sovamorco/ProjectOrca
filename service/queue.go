@@ -12,6 +12,30 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
+func (o *Orca) GetCurrent(ctx context.Context, in *pb.GuildOnlyRequest) (*pb.GetCurrentReply, error) {
+	_, guild, err := o.authenticateWithGuild(ctx, in.GuildID)
+	if err != nil {
+		o.logger.Errorf("Error authenticating request: %+v", err)
+
+		return nil, ErrFailedToAuthenticate
+	}
+
+	var track models.RemoteTrack
+
+	err = guild.CurrentTrackQuery(o.store).Scan(ctx, &track)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		o.logger.Errorf("Error getting current track: %+v", err)
+
+		return nil, ErrInternal
+	}
+
+	return &pb.GetCurrentReply{
+		Track:   track.ToProto(),
+		Looping: guild.Loop,
+		Paused:  guild.Paused,
+	}, nil
+}
+
 func (o *Orca) GetTracks(ctx context.Context, in *pb.GetTracksRequest) (*pb.GetTracksReply, error) {
 	bot, guild, err := o.authenticateWithGuild(ctx, in.GuildID)
 	if err != nil {

@@ -91,6 +91,16 @@ class GetTracksReply(_message.Message):
     remaining: _duration_pb2.Duration
     def __init__(self, tracks: _Optional[_Iterable[_Union[TrackData, _Mapping]]] = ..., totalTracks: _Optional[int] = ..., looping: bool = ..., paused: bool = ..., remaining: _Optional[_Union[_duration_pb2.Duration, _Mapping]] = ...) -> None: ...
 
+class GetCurrentReply(_message.Message):
+    __slots__ = ("track", "looping", "paused")
+    TRACK_FIELD_NUMBER: _ClassVar[int]
+    LOOPING_FIELD_NUMBER: _ClassVar[int]
+    PAUSED_FIELD_NUMBER: _ClassVar[int]
+    track: TrackData
+    looping: bool
+    paused: bool
+    def __init__(self, track: _Optional[_Union[TrackData, _Mapping]] = ..., looping: bool = ..., paused: bool = ...) -> None: ...
+
 class RemoveRequest(_message.Message):
     __slots__ = ("guildID", "position")
     GUILDID_FIELD_NUMBER: _ClassVar[int]

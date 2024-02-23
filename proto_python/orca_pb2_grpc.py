@@ -45,6 +45,11 @@ class OrcaStub(object):
                 request_serializer=orca__pb2.SeekRequest.SerializeToString,
                 response_deserializer=orca__pb2.SeekReply.FromString,
                 )
+        self.GetCurrent = channel.unary_unary(
+                '/orca.Orca/GetCurrent',
+                request_serializer=orca__pb2.GuildOnlyRequest.SerializeToString,
+                response_deserializer=orca__pb2.GetCurrentReply.FromString,
+                )
         self.GetTracks = channel.unary_unary(
                 '/orca.Orca/GetTracks',
                 request_serializer=orca__pb2.GetTracksRequest.SerializeToString,
@@ -136,6 +141,12 @@ class OrcaServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def Seek(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetCurrent(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -239,6 +250,11 @@ def add_OrcaServicer_to_server(servicer, server):
                     servicer.Seek,
                     request_deserializer=orca__pb2.SeekRequest.FromString,
                     response_serializer=orca__pb2.SeekReply.SerializeToString,
+            ),
+            'GetCurrent': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetCurrent,
+                    request_deserializer=orca__pb2.GuildOnlyRequest.FromString,
+                    response_serializer=orca__pb2.GetCurrentReply.SerializeToString,
             ),
             'GetTracks': grpc.unary_unary_rpc_method_handler(
                     servicer.GetTracks,
@@ -404,6 +420,23 @@ class Orca(object):
         return grpc.experimental.unary_unary(request, target, '/orca.Orca/Seek',
             orca__pb2.SeekRequest.SerializeToString,
             orca__pb2.SeekReply.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def GetCurrent(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(request, target, '/orca.Orca/GetCurrent',
+            orca__pb2.GuildOnlyRequest.SerializeToString,
+            orca__pb2.GetCurrentReply.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 

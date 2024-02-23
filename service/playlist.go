@@ -146,7 +146,7 @@ func (o *Orca) LoadPlaylist(ctx context.Context, in *pb.LoadPlaylistRequest) (*p
 			return nil, err
 		}
 	} else {
-		go notifications.SendQueueNotificationLog(ctx, o.logger, o.store, bot.ID, guild.ID)
+		go notifications.SendQueueNotificationLog(context.WithoutCancel(ctx), o.logger, o.store, bot.ID, guild.ID)
 	}
 
 	return &pb.PlayReply{
