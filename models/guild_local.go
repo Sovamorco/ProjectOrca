@@ -62,7 +62,9 @@ type Guild struct {
 	playing       chan struct{}
 
 	// potentially changeable lockable values
-	vc   *discordgo.VoiceConnection
+	vc        *discordgo.VoiceConnection
+	vcRetried bool
+	// lock for both vc and vcRetried
 	vcMu sync.RWMutex `exhaustruct:"optional"`
 }
 
@@ -91,7 +93,8 @@ func NewGuild(
 		resyncPlaying: make(chan struct{}, 1),
 		playing:       make(chan struct{}, 1),
 
-		vc: nil,
+		vc:        nil,
+		vcRetried: false,
 	}
 
 	go g.storeLoop(context.WithoutCancel(ctx))
@@ -105,6 +108,24 @@ func (g *Guild) getVC() *discordgo.VoiceConnection {
 	defer g.vcMu.RUnlock()
 
 	return g.vc
+}
+
+func (g *Guild) getVCRetried() bool {
+	g.vcMu.RLock()
+	defer g.vcMu.RUnlock()
+
+	return g.vcRetried
+}
+
+func (g *Guild) resetVCRetried() {
+	if !g.getVCRetried() {
+		return
+	}
+
+	g.vcMu.Lock()
+	defer g.vcMu.Unlock()
+
+	g.vcRetried = false
 }
 
 func (g *Guild) gracefulShutdown() {
@@ -250,33 +271,50 @@ func (g *Guild) vcPrecondition(ctx context.Context) error {
 		if !vc.Ready {
 			g.logger.Debug("Connection exists but not ready")
 
-			g.vcMu.Lock()
-			err := vc.Disconnect()
-			g.vc = nil
-			g.vcMu.Unlock()
-
+			err := g.tryFixVC(ctx)
 			if err != nil {
-				g.logger.Errorf("Failed to disconnect from broken channel")
+				return errorx.Decorate(err, "try fix voice connection")
 			}
-
-			return ErrNoVC
 		}
 
 		return nil
 	}
 
 	err := g.checkForVC(ctx)
-
-	switch {
-	case errors.Is(err, ErrShuttingDown) || errors.Is(err, ErrNoVC):
+	if err != nil {
 		return errorx.Decorate(err, "check for voice connection")
-	case err != nil:
-		g.logger.Errorf("Error checking for voice connection: %+v", err)
-
-		return ErrNoVC
 	}
 
 	return nil
+}
+
+func (g *Guild) tryFixVC(ctx context.Context) error {
+	g.vcMu.Lock()
+	defer g.vcMu.Unlock()
+
+	if !g.vcRetried {
+		g.vcRetried = true
+
+		err := g.connect(ctx, g.vc.ChannelID)
+		if err != nil {
+			return errorx.Decorate(err, "reconnect to voice channel")
+		}
+
+		g.logger.Info("FIXED VC!!! POGGERS")
+
+		return nil
+	}
+
+	vc := g.vc
+
+	g.vc = nil
+
+	err := vc.Disconnect()
+	if err != nil {
+		return errorx.Decorate(err, "disconnect from voice channel")
+	}
+
+	return ErrNoVC
 }
 
 func (g *Guild) checkForVC(ctx context.Context) error {
@@ -301,7 +339,7 @@ func (g *Guild) checkForVC(ctx context.Context) error {
 	case <-g.resync:
 	}
 
-	return ErrNoVC
+	return nil
 }
 
 func (g *Guild) getRemote(ctx context.Context) (*RemoteGuild, error) {
@@ -349,6 +387,8 @@ func (g *Guild) connect(ctx context.Context, channelID string) error {
 			g.vcMu.Unlock()
 		}
 
+		g.resetVCRetried()
+
 		return nil
 	}
 
@@ -362,6 +402,8 @@ func (g *Guild) connect(ctx context.Context, channelID string) error {
 		g.vc = vc
 		g.vcMu.Unlock()
 	}
+
+	g.resetVCRetried()
 
 	return nil
 }
