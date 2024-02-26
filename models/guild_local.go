@@ -196,6 +196,8 @@ func (g *Guild) playLoop(ctx context.Context) {
 
 			return
 		case err != nil:
+			g.logger.Debugf("Failed play loop preconditions: %+v", err)
+
 			time.Sleep(playLoopSleep)
 
 			continue
@@ -220,23 +222,17 @@ func (g *Guild) playLoopPreconditions(ctx context.Context, track *Track) error {
 
 	err := track.nextTrackPrecondition(ctx)
 	if err != nil {
-		g.logger.Debugf("Failed next track precondition: %+v", err)
-
-		return err
+		return errorx.Decorate(err, "next track precondition")
 	}
 
 	err = g.vcPrecondition(ctx)
 	if err != nil {
-		g.logger.Debugf("Failed vc precondition: %+v", err)
-
-		return err
+		return errorx.Decorate(err, "voice connection precondition")
 	}
 
 	err = track.packetPrecondition(ctx)
 	if err != nil {
-		g.logger.Debugf("Failed packet precondition: %+v", err)
-
-		return err
+		return errorx.Decorate(err, "packet precondition")
 	}
 
 	// try to consume playing from itself to verify that the track is, indeed, playing
@@ -272,10 +268,8 @@ func (g *Guild) vcPrecondition(ctx context.Context) error {
 	err := g.checkForVC(ctx)
 
 	switch {
-	case errors.Is(err, ErrShuttingDown):
-		return err
-	case errors.Is(err, ErrNoVC):
-		return ErrNoVC
+	case errors.Is(err, ErrShuttingDown) || errors.Is(err, ErrNoVC):
+		return errorx.Decorate(err, "check for voice connection")
 	case err != nil:
 		g.logger.Errorf("Error checking for voice connection: %+v", err)
 
