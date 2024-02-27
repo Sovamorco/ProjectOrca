@@ -62,9 +62,7 @@ type Guild struct {
 	playing       chan struct{}
 
 	// potentially changeable lockable values
-	vc        *discordgo.VoiceConnection
-	vcRetried bool
-	// lock for both vc and vcRetried
+	vc   *discordgo.VoiceConnection
 	vcMu sync.RWMutex `exhaustruct:"optional"`
 }
 
@@ -93,8 +91,7 @@ func NewGuild(
 		resyncPlaying: make(chan struct{}, 1),
 		playing:       make(chan struct{}, 1),
 
-		vc:        nil,
-		vcRetried: false,
+		vc: nil,
 	}
 
 	go g.storeLoop(context.WithoutCancel(ctx))
@@ -108,24 +105,6 @@ func (g *Guild) getVC() *discordgo.VoiceConnection {
 	defer g.vcMu.RUnlock()
 
 	return g.vc
-}
-
-func (g *Guild) getVCRetried() bool {
-	g.vcMu.RLock()
-	defer g.vcMu.RUnlock()
-
-	return g.vcRetried
-}
-
-func (g *Guild) resetVCRetried() {
-	if !g.getVCRetried() {
-		return
-	}
-
-	g.vcMu.Lock()
-	defer g.vcMu.Unlock()
-
-	g.vcRetried = false
 }
 
 func (g *Guild) gracefulShutdown() {
@@ -268,15 +247,6 @@ func (g *Guild) playLoopPreconditions(ctx context.Context, track *Track) error {
 
 func (g *Guild) vcPrecondition(ctx context.Context) error {
 	if vc := g.getVC(); vc != nil {
-		if !vc.Ready {
-			g.logger.Debug("Connection exists but not ready")
-
-			err := g.tryFixVC(ctx)
-			if err != nil {
-				return errorx.Decorate(err, "try fix voice connection")
-			}
-		}
-
 		return nil
 	}
 
@@ -286,37 +256,6 @@ func (g *Guild) vcPrecondition(ctx context.Context) error {
 	}
 
 	return nil
-}
-
-func (g *Guild) tryFixVC(ctx context.Context) error {
-	if !g.getVCRetried() {
-		g.vcMu.Lock()
-		g.vcRetried = true
-		g.vcMu.Unlock()
-
-		err := g.connect(ctx, g.vc.ChannelID)
-		if err != nil {
-			return errorx.Decorate(err, "reconnect to voice channel")
-		}
-
-		g.logger.Info("FIXED VC!!! POGGERS")
-
-		return nil
-	}
-
-	g.vcMu.Lock()
-	defer g.vcMu.Unlock()
-
-	vc := g.vc
-
-	g.vc = nil
-
-	err := vc.Disconnect()
-	if err != nil {
-		return errorx.Decorate(err, "disconnect from voice channel")
-	}
-
-	return ErrNoVC
 }
 
 func (g *Guild) checkForVC(ctx context.Context) error {
@@ -389,8 +328,6 @@ func (g *Guild) connect(ctx context.Context, channelID string) error {
 			g.vcMu.Unlock()
 		}
 
-		g.resetVCRetried()
-
 		return nil
 	}
 
@@ -404,8 +341,6 @@ func (g *Guild) connect(ctx context.Context, channelID string) error {
 		g.vc = vc
 		g.vcMu.Unlock()
 	}
-
-	g.resetVCRetried()
 
 	return nil
 }
