@@ -289,11 +289,10 @@ func (g *Guild) vcPrecondition(ctx context.Context) error {
 }
 
 func (g *Guild) tryFixVC(ctx context.Context) error {
-	g.vcMu.Lock()
-	defer g.vcMu.Unlock()
-
-	if !g.vcRetried {
+	if !g.getVCRetried() {
+		g.vcMu.Lock()
 		g.vcRetried = true
+		g.vcMu.Unlock()
 
 		err := g.connect(ctx, g.vc.ChannelID)
 		if err != nil {
@@ -304,6 +303,9 @@ func (g *Guild) tryFixVC(ctx context.Context) error {
 
 		return nil
 	}
+
+	g.vcMu.Lock()
+	defer g.vcMu.Unlock()
 
 	vc := g.vc
 
