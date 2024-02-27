@@ -78,28 +78,26 @@ class GetTracksRequest(_message.Message):
     def __init__(self, guildID: _Optional[str] = ..., start: _Optional[int] = ..., end: _Optional[int] = ...) -> None: ...
 
 class GetTracksReply(_message.Message):
-    __slots__ = ("tracks", "totalTracks", "looping", "paused", "remaining")
+    __slots__ = ("tracks", "looping", "paused")
     TRACKS_FIELD_NUMBER: _ClassVar[int]
-    TOTALTRACKS_FIELD_NUMBER: _ClassVar[int]
     LOOPING_FIELD_NUMBER: _ClassVar[int]
     PAUSED_FIELD_NUMBER: _ClassVar[int]
-    REMAINING_FIELD_NUMBER: _ClassVar[int]
     tracks: _containers.RepeatedCompositeFieldContainer[TrackData]
-    totalTracks: int
     looping: bool
     paused: bool
-    remaining: _duration_pb2.Duration
-    def __init__(self, tracks: _Optional[_Iterable[_Union[TrackData, _Mapping]]] = ..., totalTracks: _Optional[int] = ..., looping: bool = ..., paused: bool = ..., remaining: _Optional[_Union[_duration_pb2.Duration, _Mapping]] = ...) -> None: ...
+    def __init__(self, tracks: _Optional[_Iterable[_Union[TrackData, _Mapping]]] = ..., looping: bool = ..., paused: bool = ...) -> None: ...
 
-class GetCurrentReply(_message.Message):
-    __slots__ = ("track", "looping", "paused")
-    TRACK_FIELD_NUMBER: _ClassVar[int]
+class GetQueueStateReply(_message.Message):
+    __slots__ = ("totalTracks", "remaining", "looping", "paused")
+    TOTALTRACKS_FIELD_NUMBER: _ClassVar[int]
+    REMAINING_FIELD_NUMBER: _ClassVar[int]
     LOOPING_FIELD_NUMBER: _ClassVar[int]
     PAUSED_FIELD_NUMBER: _ClassVar[int]
-    track: TrackData
+    totalTracks: int
+    remaining: _duration_pb2.Duration
     looping: bool
     paused: bool
-    def __init__(self, track: _Optional[_Union[TrackData, _Mapping]] = ..., looping: bool = ..., paused: bool = ...) -> None: ...
+    def __init__(self, totalTracks: _Optional[int] = ..., remaining: _Optional[_Union[_duration_pb2.Duration, _Mapping]] = ..., looping: bool = ..., paused: bool = ...) -> None: ...
 
 class RemoveRequest(_message.Message):
     __slots__ = ("guildID", "position")

@@ -29,8 +29,8 @@ type OrcaClient interface {
 	Skip(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	Stop(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	Seek(ctx context.Context, in *SeekRequest, opts ...grpc.CallOption) (*SeekReply, error)
-	GetCurrent(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*GetCurrentReply, error)
 	GetTracks(ctx context.Context, in *GetTracksRequest, opts ...grpc.CallOption) (*GetTracksReply, error)
+	GetQueueState(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*GetQueueStateReply, error)
 	Pause(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	Resume(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	Loop(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
@@ -105,18 +105,18 @@ func (c *orcaClient) Seek(ctx context.Context, in *SeekRequest, opts ...grpc.Cal
 	return out, nil
 }
 
-func (c *orcaClient) GetCurrent(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*GetCurrentReply, error) {
-	out := new(GetCurrentReply)
-	err := c.cc.Invoke(ctx, "/orca.Orca/GetCurrent", in, out, opts...)
+func (c *orcaClient) GetTracks(ctx context.Context, in *GetTracksRequest, opts ...grpc.CallOption) (*GetTracksReply, error) {
+	out := new(GetTracksReply)
+	err := c.cc.Invoke(ctx, "/orca.Orca/GetTracks", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *orcaClient) GetTracks(ctx context.Context, in *GetTracksRequest, opts ...grpc.CallOption) (*GetTracksReply, error) {
-	out := new(GetTracksReply)
-	err := c.cc.Invoke(ctx, "/orca.Orca/GetTracks", in, out, opts...)
+func (c *orcaClient) GetQueueState(ctx context.Context, in *GuildOnlyRequest, opts ...grpc.CallOption) (*GetQueueStateReply, error) {
+	out := new(GetQueueStateReply)
+	err := c.cc.Invoke(ctx, "/orca.Orca/GetQueueState", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -246,8 +246,8 @@ type OrcaServer interface {
 	Skip(context.Context, *GuildOnlyRequest) (*emptypb.Empty, error)
 	Stop(context.Context, *GuildOnlyRequest) (*emptypb.Empty, error)
 	Seek(context.Context, *SeekRequest) (*SeekReply, error)
-	GetCurrent(context.Context, *GuildOnlyRequest) (*GetCurrentReply, error)
 	GetTracks(context.Context, *GetTracksRequest) (*GetTracksReply, error)
+	GetQueueState(context.Context, *GuildOnlyRequest) (*GetQueueStateReply, error)
 	Pause(context.Context, *GuildOnlyRequest) (*emptypb.Empty, error)
 	Resume(context.Context, *GuildOnlyRequest) (*emptypb.Empty, error)
 	Loop(context.Context, *GuildOnlyRequest) (*emptypb.Empty, error)
@@ -283,11 +283,11 @@ func (UnimplementedOrcaServer) Stop(context.Context, *GuildOnlyRequest) (*emptyp
 func (UnimplementedOrcaServer) Seek(context.Context, *SeekRequest) (*SeekReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Seek not implemented")
 }
-func (UnimplementedOrcaServer) GetCurrent(context.Context, *GuildOnlyRequest) (*GetCurrentReply, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetCurrent not implemented")
-}
 func (UnimplementedOrcaServer) GetTracks(context.Context, *GetTracksRequest) (*GetTracksReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetTracks not implemented")
+}
+func (UnimplementedOrcaServer) GetQueueState(context.Context, *GuildOnlyRequest) (*GetQueueStateReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetQueueState not implemented")
 }
 func (UnimplementedOrcaServer) Pause(context.Context, *GuildOnlyRequest) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Pause not implemented")
@@ -440,24 +440,6 @@ func _Orca_Seek_Handler(srv interface{}, ctx context.Context, dec func(interface
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Orca_GetCurrent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GuildOnlyRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(OrcaServer).GetCurrent(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/orca.Orca/GetCurrent",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(OrcaServer).GetCurrent(ctx, req.(*GuildOnlyRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _Orca_GetTracks_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetTracksRequest)
 	if err := dec(in); err != nil {
@@ -472,6 +454,24 @@ func _Orca_GetTracks_Handler(srv interface{}, ctx context.Context, dec func(inte
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(OrcaServer).GetTracks(ctx, req.(*GetTracksRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Orca_GetQueueState_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GuildOnlyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrcaServer).GetQueueState(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/orca.Orca/GetQueueState",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrcaServer).GetQueueState(ctx, req.(*GuildOnlyRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -691,12 +691,12 @@ var Orca_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Orca_Seek_Handler,
 		},
 		{
-			MethodName: "GetCurrent",
-			Handler:    _Orca_GetCurrent_Handler,
-		},
-		{
 			MethodName: "GetTracks",
 			Handler:    _Orca_GetTracks_Handler,
+		},
+		{
+			MethodName: "GetQueueState",
+			Handler:    _Orca_GetQueueState_Handler,
 		},
 		{
 			MethodName: "Pause",

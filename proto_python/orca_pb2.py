@@ -16,7 +16,7 @@ from google.protobuf import duration_pb2 as google_dot_protobuf_dot_duration__pb
 from google.protobuf import empty_pb2 as google_dot_protobuf_dot_empty__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\norca.proto\x12\x04orca\x1a\x1egoogle/protobuf/duration.proto\x1a\x1bgoogle/protobuf/empty.proto\"1\n\x0bJoinRequest\x12\x0f\n\x07guildID\x18\x01 \x01(\t\x12\x11\n\tchannelID\x18\x02 \x01(\t\"P\n\x0bPlayRequest\x12\x0f\n\x07guildID\x18\x01 \x01(\t\x12\x11\n\tchannelID\x18\x02 \x01(\t\x12\x0b\n\x03url\x18\x03 \x01(\t\x12\x10\n\x08position\x18\x04 \x01(\x03\";\n\tPlayReply\x12\x1f\n\x06tracks\x18\x01 \x03(\x0b\x32\x0f.orca.TrackData\x12\r\n\x05total\x18\x02 \x01(\x03\"\x96\x01\n\tTrackData\x12\r\n\x05title\x18\x01 \x01(\t\x12\x12\n\ndisplayURL\x18\x02 \x01(\t\x12\x0c\n\x04live\x18\x03 \x01(\x08\x12+\n\x08position\x18\x04 \x01(\x0b\x32\x19.google.protobuf.Duration\x12+\n\x08\x64uration\x18\x05 \x01(\x0b\x32\x19.google.protobuf.Duration\"#\n\x10GuildOnlyRequest\x12\x0f\n\x07guildID\x18\x01 \x01(\t\"K\n\x0bSeekRequest\x12\x0f\n\x07guildID\x18\x01 \x01(\t\x12+\n\x08position\x18\x02 \x01(\x0b\x32\x19.google.protobuf.Duration\"\x0b\n\tSeekReply\"?\n\x10GetTracksRequest\x12\x0f\n\x07guildID\x18\x01 \x01(\t\x12\r\n\x05start\x18\x02 \x01(\x03\x12\x0b\n\x03\x65nd\x18\x03 \x01(\x03\"\x95\x01\n\x0eGetTracksReply\x12\x1f\n\x06tracks\x18\x01 \x03(\x0b\x32\x0f.orca.TrackData\x12\x13\n\x0btotalTracks\x18\x02 \x01(\x03\x12\x0f\n\x07looping\x18\x03 \x01(\x08\x12\x0e\n\x06paused\x18\x04 \x01(\x08\x12,\n\tremaining\x18\x05 \x01(\x0b\x32\x19.google.protobuf.Duration\"R\n\x0fGetCurrentReply\x12\x1e\n\x05track\x18\x01 \x01(\x0b\x32\x0f.orca.TrackData\x12\x0f\n\x07looping\x18\x02 \x01(\x08\x12\x0e\n\x06paused\x18\x03 \x01(\x08\"2\n\rRemoveRequest\x12\x0f\n\x07guildID\x18\x01 \x01(\t\x12\x10\n\x08position\x18\x02 \x01(\x03\"D\n\x13SavePlaylistRequest\x12\x0f\n\x07guildID\x18\x01 \x01(\t\x12\x0e\n\x06userID\x18\x02 \x01(\t\x12\x0c\n\x04name\x18\x03 \x01(\t\"M\n\x13LoadPlaylistRequest\x12\x0f\n\x07guildID\x18\x01 \x01(\t\x12\x12\n\nplaylistID\x18\x02 \x01(\t\x12\x11\n\tchannelID\x18\x03 \x01(\t\"7\n\x14ListPlaylistsRequest\x12\x0f\n\x07guildID\x18\x01 \x01(\t\x12\x0e\n\x06userID\x18\x02 \x01(\t\"7\n\x12ListPlaylistsReply\x12!\n\tplaylists\x18\x01 \x03(\x0b\x32\x0e.orca.Playlist\"k\n\x08Playlist\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x13\n\x0btotalTracks\x18\x03 \x01(\x03\x12\x30\n\rtotalDuration\x18\x04 \x01(\x0b\x32\x19.google.protobuf.Duration\"5\n\x17QueueChangeNotification\x12\x0b\n\x03\x62ot\x18\x01 \x01(\t\x12\r\n\x05guild\x18\x02 \x01(\t2\xbe\x08\n\x04Orca\x12\x33\n\x04Join\x12\x11.orca.JoinRequest\x1a\x16.google.protobuf.Empty\"\x00\x12\x39\n\x05Leave\x12\x16.orca.GuildOnlyRequest\x1a\x16.google.protobuf.Empty\"\x00\x12,\n\x04Play\x12\x11.orca.PlayRequest\x1a\x0f.orca.PlayReply\"\x00\x12\x38\n\x04Skip\x12\x16.orca.GuildOnlyRequest\x1a\x16.google.protobuf.Empty\"\x00\x12\x38\n\x04Stop\x12\x16.orca.GuildOnlyRequest\x1a\x16.google.protobuf.Empty\"\x00\x12,\n\x04Seek\x12\x11.orca.SeekRequest\x1a\x0f.orca.SeekReply\"\x00\x12=\n\nGetCurrent\x12\x16.orca.GuildOnlyRequest\x1a\x15.orca.GetCurrentReply\"\x00\x12;\n\tGetTracks\x12\x16.orca.GetTracksRequest\x1a\x14.orca.GetTracksReply\"\x00\x12\x39\n\x05Pause\x12\x16.orca.GuildOnlyRequest\x1a\x16.google.protobuf.Empty\"\x00\x12:\n\x06Resume\x12\x16.orca.GuildOnlyRequest\x1a\x16.google.protobuf.Empty\"\x00\x12\x38\n\x04Loop\x12\x16.orca.GuildOnlyRequest\x1a\x16.google.protobuf.Empty\"\x00\x12@\n\x0cShuffleQueue\x12\x16.orca.GuildOnlyRequest\x1a\x16.google.protobuf.Empty\"\x00\x12\x37\n\x06Remove\x12\x13.orca.RemoveRequest\x1a\x16.google.protobuf.Empty\"\x00\x12\x43\n\x0cSavePlaylist\x12\x19.orca.SavePlaylistRequest\x1a\x16.google.protobuf.Empty\"\x00\x12<\n\x0cLoadPlaylist\x12\x19.orca.LoadPlaylistRequest\x1a\x0f.orca.PlayReply\"\x00\x12G\n\rListPlaylists\x12\x1a.orca.ListPlaylistsRequest\x1a\x18.orca.ListPlaylistsReply\"\x00\x12:\n\x06Health\x12\x16.google.protobuf.Empty\x1a\x16.google.protobuf.Empty\"\x00\x12\x46\n\tSubscribe\x12\x16.google.protobuf.Empty\x1a\x1d.orca.QueueChangeNotification\"\x00\x30\x01\x42\x18Z\x16ProjectOrca/proto/orcab\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\norca.proto\x12\x04orca\x1a\x1egoogle/protobuf/duration.proto\x1a\x1bgoogle/protobuf/empty.proto\"1\n\x0bJoinRequest\x12\x0f\n\x07guildID\x18\x01 \x01(\t\x12\x11\n\tchannelID\x18\x02 \x01(\t\"P\n\x0bPlayRequest\x12\x0f\n\x07guildID\x18\x01 \x01(\t\x12\x11\n\tchannelID\x18\x02 \x01(\t\x12\x0b\n\x03url\x18\x03 \x01(\t\x12\x10\n\x08position\x18\x04 \x01(\x03\";\n\tPlayReply\x12\x1f\n\x06tracks\x18\x01 \x03(\x0b\x32\x0f.orca.TrackData\x12\r\n\x05total\x18\x02 \x01(\x03\"\x96\x01\n\tTrackData\x12\r\n\x05title\x18\x01 \x01(\t\x12\x12\n\ndisplayURL\x18\x02 \x01(\t\x12\x0c\n\x04live\x18\x03 \x01(\x08\x12+\n\x08position\x18\x04 \x01(\x0b\x32\x19.google.protobuf.Duration\x12+\n\x08\x64uration\x18\x05 \x01(\x0b\x32\x19.google.protobuf.Duration\"#\n\x10GuildOnlyRequest\x12\x0f\n\x07guildID\x18\x01 \x01(\t\"K\n\x0bSeekRequest\x12\x0f\n\x07guildID\x18\x01 \x01(\t\x12+\n\x08position\x18\x02 \x01(\x0b\x32\x19.google.protobuf.Duration\"\x0b\n\tSeekReply\"?\n\x10GetTracksRequest\x12\x0f\n\x07guildID\x18\x01 \x01(\t\x12\r\n\x05start\x18\x02 \x01(\x03\x12\x0b\n\x03\x65nd\x18\x03 \x01(\x03\"R\n\x0eGetTracksReply\x12\x1f\n\x06tracks\x18\x01 \x03(\x0b\x32\x0f.orca.TrackData\x12\x0f\n\x07looping\x18\x02 \x01(\x08\x12\x0e\n\x06paused\x18\x03 \x01(\x08\"x\n\x12GetQueueStateReply\x12\x13\n\x0btotalTracks\x18\x01 \x01(\x03\x12,\n\tremaining\x18\x02 \x01(\x0b\x32\x19.google.protobuf.Duration\x12\x0f\n\x07looping\x18\x03 \x01(\x08\x12\x0e\n\x06paused\x18\x04 \x01(\x08\"2\n\rRemoveRequest\x12\x0f\n\x07guildID\x18\x01 \x01(\t\x12\x10\n\x08position\x18\x02 \x01(\x03\"D\n\x13SavePlaylistRequest\x12\x0f\n\x07guildID\x18\x01 \x01(\t\x12\x0e\n\x06userID\x18\x02 \x01(\t\x12\x0c\n\x04name\x18\x03 \x01(\t\"M\n\x13LoadPlaylistRequest\x12\x0f\n\x07guildID\x18\x01 \x01(\t\x12\x12\n\nplaylistID\x18\x02 \x01(\t\x12\x11\n\tchannelID\x18\x03 \x01(\t\"7\n\x14ListPlaylistsRequest\x12\x0f\n\x07guildID\x18\x01 \x01(\t\x12\x0e\n\x06userID\x18\x02 \x01(\t\"7\n\x12ListPlaylistsReply\x12!\n\tplaylists\x18\x01 \x03(\x0b\x32\x0e.orca.Playlist\"k\n\x08Playlist\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x13\n\x0btotalTracks\x18\x03 \x01(\x03\x12\x30\n\rtotalDuration\x18\x04 \x01(\x0b\x32\x19.google.protobuf.Duration\"5\n\x17QueueChangeNotification\x12\x0b\n\x03\x62ot\x18\x01 \x01(\t\x12\r\n\x05guild\x18\x02 \x01(\t2\xc4\x08\n\x04Orca\x12\x33\n\x04Join\x12\x11.orca.JoinRequest\x1a\x16.google.protobuf.Empty\"\x00\x12\x39\n\x05Leave\x12\x16.orca.GuildOnlyRequest\x1a\x16.google.protobuf.Empty\"\x00\x12,\n\x04Play\x12\x11.orca.PlayRequest\x1a\x0f.orca.PlayReply\"\x00\x12\x38\n\x04Skip\x12\x16.orca.GuildOnlyRequest\x1a\x16.google.protobuf.Empty\"\x00\x12\x38\n\x04Stop\x12\x16.orca.GuildOnlyRequest\x1a\x16.google.protobuf.Empty\"\x00\x12,\n\x04Seek\x12\x11.orca.SeekRequest\x1a\x0f.orca.SeekReply\"\x00\x12;\n\tGetTracks\x12\x16.orca.GetTracksRequest\x1a\x14.orca.GetTracksReply\"\x00\x12\x43\n\rGetQueueState\x12\x16.orca.GuildOnlyRequest\x1a\x18.orca.GetQueueStateReply\"\x00\x12\x39\n\x05Pause\x12\x16.orca.GuildOnlyRequest\x1a\x16.google.protobuf.Empty\"\x00\x12:\n\x06Resume\x12\x16.orca.GuildOnlyRequest\x1a\x16.google.protobuf.Empty\"\x00\x12\x38\n\x04Loop\x12\x16.orca.GuildOnlyRequest\x1a\x16.google.protobuf.Empty\"\x00\x12@\n\x0cShuffleQueue\x12\x16.orca.GuildOnlyRequest\x1a\x16.google.protobuf.Empty\"\x00\x12\x37\n\x06Remove\x12\x13.orca.RemoveRequest\x1a\x16.google.protobuf.Empty\"\x00\x12\x43\n\x0cSavePlaylist\x12\x19.orca.SavePlaylistRequest\x1a\x16.google.protobuf.Empty\"\x00\x12<\n\x0cLoadPlaylist\x12\x19.orca.LoadPlaylistRequest\x1a\x0f.orca.PlayReply\"\x00\x12G\n\rListPlaylists\x12\x1a.orca.ListPlaylistsRequest\x1a\x18.orca.ListPlaylistsReply\"\x00\x12:\n\x06Health\x12\x16.google.protobuf.Empty\x1a\x16.google.protobuf.Empty\"\x00\x12\x46\n\tSubscribe\x12\x16.google.protobuf.Empty\x1a\x1d.orca.QueueChangeNotification\"\x00\x30\x01\x42\x18Z\x16ProjectOrca/proto/orcab\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -40,24 +40,24 @@ if _descriptor._USE_C_DESCRIPTORS == False:
   _globals['_SEEKREPLY']._serialized_end=553
   _globals['_GETTRACKSREQUEST']._serialized_start=555
   _globals['_GETTRACKSREQUEST']._serialized_end=618
-  _globals['_GETTRACKSREPLY']._serialized_start=621
-  _globals['_GETTRACKSREPLY']._serialized_end=770
-  _globals['_GETCURRENTREPLY']._serialized_start=772
-  _globals['_GETCURRENTREPLY']._serialized_end=854
-  _globals['_REMOVEREQUEST']._serialized_start=856
-  _globals['_REMOVEREQUEST']._serialized_end=906
-  _globals['_SAVEPLAYLISTREQUEST']._serialized_start=908
-  _globals['_SAVEPLAYLISTREQUEST']._serialized_end=976
-  _globals['_LOADPLAYLISTREQUEST']._serialized_start=978
-  _globals['_LOADPLAYLISTREQUEST']._serialized_end=1055
-  _globals['_LISTPLAYLISTSREQUEST']._serialized_start=1057
-  _globals['_LISTPLAYLISTSREQUEST']._serialized_end=1112
-  _globals['_LISTPLAYLISTSREPLY']._serialized_start=1114
-  _globals['_LISTPLAYLISTSREPLY']._serialized_end=1169
-  _globals['_PLAYLIST']._serialized_start=1171
-  _globals['_PLAYLIST']._serialized_end=1278
-  _globals['_QUEUECHANGENOTIFICATION']._serialized_start=1280
-  _globals['_QUEUECHANGENOTIFICATION']._serialized_end=1333
-  _globals['_ORCA']._serialized_start=1336
-  _globals['_ORCA']._serialized_end=2422
+  _globals['_GETTRACKSREPLY']._serialized_start=620
+  _globals['_GETTRACKSREPLY']._serialized_end=702
+  _globals['_GETQUEUESTATEREPLY']._serialized_start=704
+  _globals['_GETQUEUESTATEREPLY']._serialized_end=824
+  _globals['_REMOVEREQUEST']._serialized_start=826
+  _globals['_REMOVEREQUEST']._serialized_end=876
+  _globals['_SAVEPLAYLISTREQUEST']._serialized_start=878
+  _globals['_SAVEPLAYLISTREQUEST']._serialized_end=946
+  _globals['_LOADPLAYLISTREQUEST']._serialized_start=948
+  _globals['_LOADPLAYLISTREQUEST']._serialized_end=1025
+  _globals['_LISTPLAYLISTSREQUEST']._serialized_start=1027
+  _globals['_LISTPLAYLISTSREQUEST']._serialized_end=1082
+  _globals['_LISTPLAYLISTSREPLY']._serialized_start=1084
+  _globals['_LISTPLAYLISTSREPLY']._serialized_end=1139
+  _globals['_PLAYLIST']._serialized_start=1141
+  _globals['_PLAYLIST']._serialized_end=1248
+  _globals['_QUEUECHANGENOTIFICATION']._serialized_start=1250
+  _globals['_QUEUECHANGENOTIFICATION']._serialized_end=1303
+  _globals['_ORCA']._serialized_start=1306
+  _globals['_ORCA']._serialized_end=2398
 # @@protoc_insertion_point(module_scope)

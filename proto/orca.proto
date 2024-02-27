@@ -12,8 +12,8 @@ service Orca {
   rpc Skip(GuildOnlyRequest) returns (google.protobuf.Empty) {}
   rpc Stop(GuildOnlyRequest) returns (google.protobuf.Empty) {}
   rpc Seek(SeekRequest) returns (SeekReply) {}
-  rpc GetCurrent(GuildOnlyRequest) returns (GetCurrentReply) {}
   rpc GetTracks(GetTracksRequest) returns (GetTracksReply) {}
+  rpc GetQueueState(GuildOnlyRequest) returns (GetQueueStateReply) {}
   rpc Pause(GuildOnlyRequest) returns (google.protobuf.Empty) {}
   rpc Resume(GuildOnlyRequest) returns (google.protobuf.Empty) {}
   rpc Loop(GuildOnlyRequest) returns (google.protobuf.Empty) {}
@@ -69,16 +69,15 @@ message GetTracksRequest {
 
 message GetTracksReply {
   repeated TrackData tracks = 1;
-  int64 totalTracks = 2;
-  bool looping = 3;
-  bool paused = 4;
-  google.protobuf.Duration remaining = 5;
-}
-
-message GetCurrentReply {
-  TrackData track = 1;
   bool looping = 2;
   bool paused = 3;
+}
+
+message GetQueueStateReply {
+  int64 totalTracks = 1;
+  google.protobuf.Duration remaining = 2;
+  bool looping = 3;
+  bool paused = 4;
 }
 
 message RemoveRequest {
