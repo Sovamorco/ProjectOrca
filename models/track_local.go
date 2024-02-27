@@ -337,29 +337,27 @@ func (t *Track) packetPrecondition(ctx context.Context) error {
 	}
 
 	if errors.Is(err, io.EOF) {
-		err = t.stop(ctx)
-		if err != nil {
-			t.g.logger.Errorf("Error stopping current track: %+v", err)
+		ierr := t.stop(ctx)
+		if ierr != nil {
+			return errorx.Decorate(ierr, "stop track")
 		}
 
-		return io.EOF
+		return nil
 	}
 
-	t.g.logger.Errorf("Error getting packet from stream: %+v", err)
-
-	_, err = t.g.store.
+	_, rerr := t.g.store.
 		NewUpdate().
 		Model(t.remote).
 		Set("stream_url = ?", "").
 		WherePK().
 		Exec(ctx)
-	if err != nil {
-		t.g.logger.Errorf("Error resetting stream url: %+v", err)
+	if rerr != nil {
+		t.g.logger.Errorf("Error resetting stream url: %+v", rerr)
 	}
 
 	t.clean()
 
-	return ErrBrokenStreamURL
+	return errorx.Decorate(err, "send packet burst")
 }
 
 func (t *Track) incrementPos() {
