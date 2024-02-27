@@ -217,7 +217,7 @@ func (g *Guild) playLoop(ctx context.Context) {
 
 			return
 		case err != nil:
-			g.logger.Debugf("Failed play loop preconditions: %+v", err)
+			g.logger.Errorf("Failed play loop preconditions: %+v", err)
 
 			time.Sleep(playLoopSleep)
 
