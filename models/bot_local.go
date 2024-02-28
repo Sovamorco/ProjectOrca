@@ -42,7 +42,9 @@ func NewBot(
 	}
 
 	b.session = sess
-	b.logger = b.logger.With("bot_id", b.GetID())
+	b.logger = b.logger.With(
+		zap.String("bot_id", b.GetID()),
+	)
 
 	return &b, nil
 }

@@ -48,7 +48,9 @@ loop:
 			}
 		}
 
-		logger := logger.With("channel", msg.Channel)
+		logger := logger.With(
+			zap.String("channel", msg.Channel),
+		)
 
 		// ignore messages from keyevent del channel
 		if msg.Channel == "__keyevent@0__:del" {

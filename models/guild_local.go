@@ -76,7 +76,9 @@ func NewGuild(
 	store *store.Store,
 	extractors *extractor.Extractors,
 ) *Guild {
-	logger = logger.Named("guild").With("guild_id", id)
+	logger = logger.Named("guild").With(
+		zap.String("guild_id", id),
+	)
 	g := &Guild{
 		id:         id,
 		botID:      botID,
