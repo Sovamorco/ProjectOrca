@@ -2,6 +2,8 @@ module ProjectOrca
 
 go 1.22
 
+replace github.com/bwmarrin/discordgo v0.27.1 => github.com/sovamorco/discordgo v0.0.0-20240228181943-ad14bd2aeb03
+
 require (
 	github.com/bwmarrin/discordgo v0.27.1
 	github.com/go-redsync/redsync/v4 v4.12.1
