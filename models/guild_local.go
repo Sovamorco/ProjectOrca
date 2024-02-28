@@ -339,6 +339,8 @@ func (g *Guild) connect(ctx context.Context, channelID string) error {
 			return errorx.Decorate(err, "join voice channel")
 		}
 
+		vc.LogLevel = discordgo.LogInformational
+
 		g.vcMu.Lock()
 		g.vc = vc
 		g.vcMu.Unlock()
