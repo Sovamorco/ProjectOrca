@@ -2,15 +2,22 @@ package extractor
 
 import (
 	"context"
-	"errors"
 	"time"
 
+	pb "ProjectOrca/proto"
+	"ProjectOrca/utils"
+
 	"github.com/joomcode/errorx"
+	"google.golang.org/grpc/codes"
 )
 
 var (
-	ErrNoExtractor = errors.New("no extractor for url")
-	ErrNoResults   = errors.New("no search results") // common error
+	ErrNoExtractor = utils.MustCreateStatus(codes.InvalidArgument, "no extractor for given url", &pb.ErrorCodeWrapper{
+		Code: pb.ErrorCode_ErrNoExtractor,
+	}).Err()
+	ErrNoResults = utils.MustCreateStatus(codes.InvalidArgument, "no results for given url", &pb.ErrorCodeWrapper{
+		Code: pb.ErrorCode_ErrNoResults,
+	}).Err()
 )
 
 type TrackData struct {

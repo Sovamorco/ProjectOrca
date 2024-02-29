@@ -16,6 +16,11 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	ytdlpUnsupportedWarning = "The program functionality for this site has been marked as broken, " +
+		"and will probably not work"
+)
+
 var ErrInvalidOutput = errors.New("yt-dlp produced invalid output")
 
 type TrackData struct {
@@ -180,6 +185,10 @@ func (y *YTDL) getYTDLPOutput(args ...string) ([]byte, error) {
 
 	err = ytdlp.Wait()
 	if err != nil {
+		if strings.Contains(string(errlog), ytdlpUnsupportedWarning) {
+			return nil, extractor.ErrNoExtractor
+		}
+
 		y.logger.Errorf("YTDLP stderr:\n%s", string(errlog))
 
 		return nil, errorx.Decorate(err, "wait for ytdlp")

@@ -2,6 +2,11 @@ package utils
 
 import (
 	"regexp"
+
+	"github.com/joomcode/errorx"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/protoadapt"
 )
 
 var (
@@ -24,4 +29,15 @@ func Flatten[S ~[]E, E any](s []S) S {
 	}
 
 	return res
+}
+
+func MustCreateStatus(c codes.Code, msg string, details ...protoadapt.MessageV1) *status.Status {
+	s := status.New(c, msg)
+
+	s, err := s.WithDetails(details...)
+	if err != nil {
+		panic(errorx.Decorate(err, "with details"))
+	}
+
+	return s
 }

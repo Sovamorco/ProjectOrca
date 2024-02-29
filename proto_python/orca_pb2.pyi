@@ -1,11 +1,23 @@
 from google.protobuf import duration_pb2 as _duration_pb2
 from google.protobuf import empty_pb2 as _empty_pb2
 from google.protobuf.internal import containers as _containers
+from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
 from typing import ClassVar as _ClassVar, Iterable as _Iterable, Mapping as _Mapping, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
+
+class ErrorCode(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    ErrNone: _ClassVar[ErrorCode]
+    ErrQueueTooLarge: _ClassVar[ErrorCode]
+    ErrNoExtractor: _ClassVar[ErrorCode]
+    ErrNoResults: _ClassVar[ErrorCode]
+ErrNone: ErrorCode
+ErrQueueTooLarge: ErrorCode
+ErrNoExtractor: ErrorCode
+ErrNoResults: ErrorCode
 
 class JoinRequest(_message.Message):
     __slots__ = ("guildID", "channelID")
@@ -160,3 +172,9 @@ class QueueChangeNotification(_message.Message):
     bot: str
     guild: str
     def __init__(self, bot: _Optional[str] = ..., guild: _Optional[str] = ...) -> None: ...
+
+class ErrorCodeWrapper(_message.Message):
+    __slots__ = ("code",)
+    CODE_FIELD_NUMBER: _ClassVar[int]
+    code: ErrorCode
+    def __init__(self, code: _Optional[_Union[ErrorCode, str]] = ...) -> None: ...

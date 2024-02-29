@@ -8,6 +8,7 @@ import (
 
 	"ProjectOrca/models"
 	"ProjectOrca/models/notifications"
+	"ProjectOrca/utils"
 
 	pb "ProjectOrca/proto"
 
@@ -27,8 +28,10 @@ const (
 	queueSizeLimit = 500_000
 )
 
-var ErrQueueTooLarge = status.Error(codes.InvalidArgument,
-	fmt.Sprintf("queue can have at most %d tracks", queueSizeLimit))
+var ErrQueueTooLarge = utils.MustCreateStatus(codes.OutOfRange,
+	fmt.Sprintf("queue can have at most %d tracks", queueSizeLimit), &pb.ErrorCodeWrapper{
+		Code: pb.ErrorCode_ErrQueueTooLarge,
+	}).Err()
 
 func (o *Orca) Play(ctx context.Context, in *pb.PlayRequest) (*pb.PlayReply, error) {
 	bot, guild, err := o.authenticateWithGuild(ctx, in.GuildID)
@@ -40,8 +43,8 @@ func (o *Orca) Play(ctx context.Context, in *pb.PlayRequest) (*pb.PlayReply, err
 
 	tracksData, total, affectedFirst, err := o.addTracks(ctx, bot, guild, in.Url, int(in.Position))
 	if err != nil {
-		if errors.Is(err, ErrQueueTooLarge) {
-			return nil, ErrQueueTooLarge
+		if statusErr, ok := status.FromError(err); ok {
+			return nil, statusErr.Err()
 		}
 
 		o.logger.Errorf("Error adding tracks: %+v", err)

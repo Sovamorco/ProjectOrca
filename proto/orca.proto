@@ -115,3 +115,14 @@ message QueueChangeNotification {
   string bot = 1;
   string guild = 2;
 }
+
+enum ErrorCode {
+  ErrNone = 0;
+  ErrQueueTooLarge = 1;
+  ErrNoExtractor = 2;
+  ErrNoResults = 3;
+}
+
+message ErrorCodeWrapper {
+  ErrorCode code = 1;
+}

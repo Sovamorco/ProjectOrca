@@ -35,3 +35,4 @@ linters-settings:
     - status.Error(
     - status.Errorf(
     - fmt.Errorf(
+    - (*google.golang.org/grpc/internal/status.Status).Err(
