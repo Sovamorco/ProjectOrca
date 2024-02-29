@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/lib/pq"
+	"github.com/rs/zerolog"
 
 	"github.com/hashicorp/vault-client-go"
 	"github.com/joomcode/errorx"
@@ -22,7 +23,6 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
-	"go.uber.org/zap"
 )
 
 const (
@@ -89,7 +89,6 @@ func (r *RedisConfig) getOptions() *redis.Options {
 type Store struct {
 	*bun.DB
 	*redis.Client
-	logger           *zap.SugaredLogger
 	shutdownFuncs    []func(ctx context.Context)
 	unsubscribeFuncs []func(ctx context.Context)
 	rs               *redsync.Redsync
@@ -139,7 +138,7 @@ func createConnectorWrapper(ctx context.Context, config *DBConfig, vc *vault.Cli
 	}
 }
 
-func NewStore(ctx context.Context, logger *zap.SugaredLogger, config *Config, vc *vault.Client) *Store {
+func NewStore(ctx context.Context, config *Config, vc *vault.Client) *Store {
 	sqldb := sql.OpenDB(Driver{CreateConnectorFunc: createConnectorWrapper(context.WithoutCancel(ctx), &config.DB, vc)})
 	db := bun.NewDB(sqldb, pgdialect.New())
 
@@ -147,7 +146,6 @@ func NewStore(ctx context.Context, logger *zap.SugaredLogger, config *Config, vc
 	pool := goredis.NewPool(client)
 
 	return &Store{
-		logger:           logger.Named("store"),
 		DB:               db,
 		Client:           client,
 		shutdownFuncs:    make([]func(ctx context.Context), 0),
@@ -158,23 +156,26 @@ func NewStore(ctx context.Context, logger *zap.SugaredLogger, config *Config, vc
 }
 
 func (s *Store) Shutdown(ctx context.Context) {
-	s.logger.Info("Shutting down")
+	logger := zerolog.Ctx(ctx)
+
+	logger.Info().Msg("Shutting down")
 
 	s.doShutdownFuncs(ctx)
 
 	err := s.DB.Close()
 	if err != nil {
-		s.logger.Errorf("Error closing bun store: %+v", err)
+		logger.Error().Err(err).Msg("Error closing bun store")
 	}
 
 	err = s.Client.Close()
 	if err != nil {
-		s.logger.Errorf("Error closing redis client: %+v", err)
+		logger.Error().Err(err).Msg("Error closing redis client")
 	}
 }
 
 func (s *Store) Unsubscribe(ctx context.Context) {
-	s.logger.Info("Unsubscribing")
+	logger := zerolog.Ctx(ctx)
+	logger.Info().Msg("Unsubscribing")
 
 	var wg sync.WaitGroup
 

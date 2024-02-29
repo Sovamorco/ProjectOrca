@@ -98,8 +98,7 @@ message LoadPlaylistRequest {
 }
 
 message ListPlaylistsRequest {
-  string guildID = 1;
-  string userID = 2;
+  string userID = 1;
 }
 
 message ListPlaylistsReply { repeated Playlist playlists = 1; }

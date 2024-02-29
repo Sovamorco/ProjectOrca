@@ -9,25 +9,24 @@ import (
 
 	"github.com/joomcode/errorx"
 	"github.com/redis/go-redis/v9"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 func (o *Orca) Subscribe(_ *emptypb.Empty, srv pb.Orca_SubscribeServer) error {
-	bot, err := o.authenticate(srv.Context())
-	if err != nil {
-		o.logger.Errorf("Error authenticating request: %+v", err)
+	ctx := srv.Context()
 
-		return ErrFailedToAuthenticate
+	bot, err := parseBotContext(ctx)
+	if err != nil {
+		return errorx.Decorate(err, "parse bot context")
 	}
 
-	o.store.Subscribe(srv.Context(),
+	o.store.Subscribe(ctx,
 		o.handleQueueNotification(srv),
 		notifications.QueueNotificationChannelForBot(o.config.Redis.Prefix, bot.ID),
 	)
 
 	select {
-	case <-srv.Context().Done():
+	case <-ctx.Done():
 	case <-o.shutdown:
 	}
 
@@ -36,8 +35,8 @@ func (o *Orca) Subscribe(_ *emptypb.Empty, srv pb.Orca_SubscribeServer) error {
 
 func (o *Orca) handleQueueNotification(
 	srv pb.Orca_SubscribeServer,
-) func(context.Context, *zap.SugaredLogger, *redis.Message) error {
-	return func(_ context.Context, _ *zap.SugaredLogger, m *redis.Message) error {
+) func(context.Context, *redis.Message) error {
+	return func(_ context.Context, m *redis.Message) error {
 		var msg notifications.QueueNotificationMessage
 
 		err := json.Unmarshal([]byte(m.Payload), &msg)

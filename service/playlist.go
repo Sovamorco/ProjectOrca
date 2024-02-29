@@ -2,7 +2,6 @@ package orca
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -13,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/joomcode/errorx"
+	"github.com/rs/zerolog"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -27,18 +27,14 @@ var ErrPlaylistTooLarge = status.Error(codes.InvalidArgument,
 	fmt.Sprintf("playlist can have at most %d tracks", playlistSizeLimit))
 
 func (o *Orca) SavePlaylist(ctx context.Context, in *pb.SavePlaylistRequest) (*emptypb.Empty, error) {
-	_, guild, err := o.authenticateWithGuild(ctx, in.GuildID)
+	_, guild, err := parseGuildContext(ctx)
 	if err != nil {
-		o.logger.Errorf("Error authenticating request: %+v", err)
-
-		return nil, ErrFailedToAuthenticate
+		return nil, errorx.Decorate(err, "parse authenticated context")
 	}
 
 	qlen, err := guild.TracksQuery(o.store).Count(ctx)
 	if err != nil {
-		o.logger.Errorf("Error counting tracks from queue: %+v", err)
-
-		return nil, ErrInternal
+		return nil, errorx.Decorate(err, "get queue length")
 	}
 
 	if qlen == 0 {
@@ -49,9 +45,7 @@ func (o *Orca) SavePlaylist(ctx context.Context, in *pb.SavePlaylistRequest) (*e
 
 	err = o.savePlaylist(ctx, guild, in.UserID, in.Name)
 	if err != nil {
-		o.logger.Errorf("Error saving playlist: %+v", err)
-
-		return nil, ErrInternal
+		return nil, errorx.Decorate(err, "save playlist")
 	}
 
 	return &emptypb.Empty{}, nil
@@ -102,42 +96,30 @@ func (o *Orca) savePlaylist(ctx context.Context, guild *models.RemoteGuild, user
 }
 
 func (o *Orca) LoadPlaylist(ctx context.Context, in *pb.LoadPlaylistRequest) (*pb.PlayReply, error) {
-	bot, guild, err := o.authenticateWithGuild(ctx, in.GuildID)
+	bot, guild, err := parseGuildContext(ctx)
 	if err != nil {
-		o.logger.Errorf("Error authenticating request: %+v", err)
-
-		return nil, ErrFailedToAuthenticate
+		return nil, errorx.Decorate(err, "parse authenticated context")
 	}
 
 	qmax := 0.
 
 	qlen, err := guild.TracksQuery(o.store).Count(ctx)
 	if err != nil {
-		o.logger.Errorf("Error counting queue tracks: %+v", err)
-
-		return nil, ErrInternal
+		return nil, errorx.Decorate(err, "get current queue length")
 	}
 
 	err = guild.TracksQuery(o.store).
 		ColumnExpr("MAX(ord_key)").
 		Scan(ctx, &qmax)
 	if err != nil {
-		o.logger.Errorf("Error getting max current ord key: %+v", err)
-
-		return nil, ErrInternal
+		return nil, errorx.Decorate(err, "get current max ord_key")
 	}
 
 	qempty := qlen == 0
 
 	protoTracks, total, err := o.addPlaylistTracks(ctx, bot.ID, guild.ID, in.PlaylistID, qlen, qmax)
 	if err != nil {
-		if errors.Is(err, ErrQueueTooLarge) {
-			return nil, ErrQueueTooLarge
-		}
-
-		o.logger.Errorf("Error adding playlist tracks: %+v", err)
-
-		return nil, ErrInternal
+		return nil, errorx.Decorate(err, "add playlist tracks")
 	}
 
 	if qempty {
@@ -146,7 +128,7 @@ func (o *Orca) LoadPlaylist(ctx context.Context, in *pb.LoadPlaylistRequest) (*p
 			return nil, err
 		}
 	} else {
-		go notifications.SendQueueNotificationLog(context.WithoutCancel(ctx), o.logger, o.store, bot.ID, guild.ID)
+		go notifications.SendQueueNotificationLog(context.WithoutCancel(ctx), o.store, bot.ID, guild.ID)
 	}
 
 	return &pb.PlayReply{
@@ -161,12 +143,14 @@ func (o *Orca) addPlaylistTracks(
 	qlen int,
 	qmax float64,
 ) ([]*pb.TrackData, int, error) {
+	logger := zerolog.Ctx(ctx)
+
 	playlistTracks, playlistN, err := o.getPlaylistPreview(ctx, qlen, playlistID)
 	if err != nil {
 		return nil, 0, errorx.Decorate(err, "get playlist preview")
 	}
 
-	o.logger.Debugf("Loading playlist with length: %d", playlistN)
+	logger.Debug().Int("len", playlistN).Msg("Loading playlist")
 
 	baseOrdKey := qmax - playlistTracks[0].OrdKey + edgeOrdKeyDiff
 
@@ -235,11 +219,9 @@ func (o *Orca) getPlaylistPreview(
 }
 
 func (o *Orca) ListPlaylists(ctx context.Context, in *pb.ListPlaylistsRequest) (*pb.ListPlaylistsReply, error) {
-	_, _, err := o.authenticateWithGuild(ctx, in.GuildID)
+	_, err := parseBotContext(ctx)
 	if err != nil {
-		o.logger.Errorf("Error authenticating request: %+v", err)
-
-		return nil, ErrFailedToAuthenticate
+		return nil, errorx.Decorate(err, "parse bot context")
 	}
 
 	var playlists []*struct {
@@ -271,9 +253,7 @@ func (o *Orca) ListPlaylists(ctx context.Context, in *pb.ListPlaylistsRequest) (
 		Where("user_id = ?", in.UserID).
 		Scan(ctx, &playlists)
 	if err != nil {
-		o.logger.Errorf("Error selecting user playlists: %+v", err)
-
-		return nil, ErrInternal
+		return nil, errorx.Decorate(err, "select playlists for user_id = \"%s\"", in.UserID)
 	}
 
 	res := make([]*pb.Playlist, len(playlists))

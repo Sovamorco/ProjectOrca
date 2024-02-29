@@ -8,7 +8,7 @@ import (
 	"ProjectOrca/store"
 
 	"github.com/joomcode/errorx"
-	"go.uber.org/zap"
+	"github.com/rs/zerolog"
 )
 
 const (
@@ -47,12 +47,13 @@ func SendQueueNotification(
 
 func SendQueueNotificationLog(
 	ctx context.Context,
-	logger *zap.SugaredLogger,
 	store *store.Store,
 	botID string, guildID string,
 ) {
+	logger := zerolog.Ctx(ctx)
+
 	err := SendQueueNotification(ctx, store, botID, guildID)
 	if err != nil {
-		logger.Errorf("Error sending queue notification: %+v", err)
+		logger.Error().Err(err).Msg("Error sending queue notification")
 	}
 }

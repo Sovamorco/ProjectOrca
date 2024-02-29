@@ -12,6 +12,11 @@ import (
 	"ProjectOrca/ytdl"
 
 	"github.com/go-redsync/redsync/v4"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"ProjectOrca/extractor"
 
@@ -21,22 +26,39 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/joomcode/errorx"
-	"go.uber.org/zap"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 var (
-	ErrFailedToAuthenticate = status.Error(codes.Unauthenticated, "failed to authenticate bot")
-	ErrInternal             = status.Error(codes.Internal, "internal error")
+	ErrInternal        = status.Error(codes.Internal, "internal error")
+	ErrUnauthenticated = status.Error(codes.Unauthenticated, "unauthenticated")
 )
+
+// wrappedStream wraps around the embedded grpc.ServerStream, and intercepts the RecvMsg and
+// SendMsg method call.
+//
+//nolint:containedctx
+type wrappedStream struct {
+	ctx context.Context
+	grpc.ServerStream
+}
+
+func (w *wrappedStream) Context() context.Context {
+	return w.ctx
+}
+
+func newWrappedStream(ctx context.Context, s grpc.ServerStream) *wrappedStream {
+	return &wrappedStream{ctx, s}
+}
+
+type GuildIDGetter interface {
+	GetGuildID() string
+}
 
 type Orca struct {
 	pb.UnimplementedOrcaServer `exhaustruct:"optional"`
 
 	// static values
 	id         string
-	logger     *zap.SugaredLogger
 	store      *store.Store
 	extractors *extractor.Extractors
 	config     *config.Config
@@ -48,13 +70,10 @@ type Orca struct {
 }
 
 func New(
-	ctx context.Context, logger *zap.SugaredLogger, st *store.Store, config *config.Config,
+	ctx context.Context, st *store.Store, config *config.Config,
 ) (*Orca, error) {
-	serverLogger := logger.Named("server")
-
 	orca := &Orca{
 		id:         uuid.New().String(),
-		logger:     serverLogger,
 		store:      st,
 		extractors: extractor.NewExtractors(),
 		config:     config,
@@ -88,7 +107,6 @@ func (o *Orca) initExtractors(ctx context.Context) error {
 	if o.config.VK != nil {
 		v, err := vk.New(
 			ctx,
-			o.logger,
 			o.config.VK.Token,
 		)
 		if err != nil {
@@ -98,7 +116,7 @@ func (o *Orca) initExtractors(ctx context.Context) error {
 		o.extractors.AddExtractor(v)
 	}
 
-	o.extractors.AddExtractor(ytdl.New(o.logger))
+	o.extractors.AddExtractor(ytdl.New())
 
 	return nil
 }
@@ -119,12 +137,13 @@ func (o *Orca) ShutdownStreams() {
 }
 
 func (o *Orca) Shutdown(ctx context.Context) {
-	o.logger.Info("Shutting down")
+	logger := zerolog.Ctx(ctx)
+	logger.Info().Msg("Shutting down")
 
 	o.states.Range(func(_, value any) bool {
 		state, _ := value.(*models.Bot)
 
-		state.Shutdown()
+		state.Shutdown(ctx)
 
 		return true
 	})
@@ -135,6 +154,8 @@ func (o *Orca) Shutdown(ctx context.Context) {
 }
 
 func (o *Orca) initFromStore(ctx context.Context) error {
+	logger := zerolog.Ctx(ctx)
+
 	var bots []*models.RemoteBot
 
 	err := o.store.
@@ -147,27 +168,30 @@ func (o *Orca) initFromStore(ctx context.Context) error {
 	}
 
 	for _, state := range bots {
+		logger := logger.With().Str("botID", state.ID).Logger()
+		ctx := logger.WithContext(ctx)
+
 		err = o.store.Lock(ctx, state.ID)
 		if err != nil {
 			var et *redsync.ErrTaken
 
 			if !errors.As(err, &et) {
-				o.logger.Errorf("Error locking state: %+v", err)
+				logger.Error().Err(err).Msg("Error locking state")
 			}
 
 			continue
 		}
 
-		o.logger.Infof("Locked state %s", state.ID)
+		logger.Info().Msg("Locked state")
 
 		if s := o.getStateByToken(state.Token); s != nil {
 			// state already controlled, no need to init
 			continue
 		}
 
-		localState, err := models.NewBot(o.logger, o.store, o.extractors, state.Token)
+		localState, err := models.NewBot(o.store, o.extractors, state.Token)
 		if err != nil {
-			o.logger.Errorf("Could not create local state for remote state %s: %+v", state.ID, err)
+			logger.Error().Err(err).Msg("Could not create local state for remote state")
 
 			continue
 		}
@@ -195,4 +219,76 @@ func (o *Orca) getStateByToken(token string) *models.Bot {
 	})
 
 	return res
+}
+
+//nolint:ireturn // required by function signature.
+func (o *Orca) UnaryInterceptor(
+	ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler,
+) (any, error) {
+	// put default logger in context.
+	ctx = log.Logger.WithContext(ctx)
+
+	var err error
+
+	in, ok := req.(GuildIDGetter)
+	if ok {
+		guildID := in.GetGuildID()
+
+		ctx, err = o.authenticateWithGuild(ctx, guildID)
+		if err != nil {
+			log.Error().Str("guildID", guildID).Err(err).Msg("Error authenticating with guild")
+
+			return nil, ErrUnauthenticated
+		}
+	} else {
+		ctx, err = o.authenticate(ctx)
+		if err != nil {
+			log.Error().Err(err).Msg("Error authenticating")
+
+			return nil, ErrUnauthenticated
+		}
+	}
+
+	logger := zerolog.Ctx(ctx).With().Str("method", info.FullMethod).Logger()
+	ctx = logger.WithContext(ctx)
+
+	logger.Trace().Msg("Called")
+
+	resp, err := handler(ctx, req)
+	if err != nil {
+		if statusErr, ok := status.FromError(err); ok {
+			return nil, statusErr.Err()
+		}
+
+		logger.Error().Err(err).Msg("Error in handler")
+
+		return nil, ErrInternal
+	}
+
+	return resp, nil
+}
+
+func (o *Orca) StreamInterceptor(
+	srv interface{}, stream grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler,
+) error {
+	ctx := stream.Context()
+
+	// put default logger in context.
+	ctx = log.Logger.WithContext(ctx)
+
+	ctx, err := o.authenticate(ctx)
+	if err != nil {
+		log.Error().Err(err).Msg("Error authenticating")
+
+		return ErrUnauthenticated
+	}
+
+	logger := zerolog.Ctx(ctx).With().Str("method", info.FullMethod).Logger()
+	ctx = logger.WithContext(ctx)
+
+	ws := newWrappedStream(ctx, stream)
+
+	logger.Trace().Msg("Called")
+
+	return handler(srv, ws)
 }

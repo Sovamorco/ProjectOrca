@@ -11,12 +11,11 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/hashicorp/go-multierror"
 	"github.com/joomcode/errorx"
-	"go.uber.org/zap"
+	"github.com/rs/zerolog"
 )
 
 type Bot struct {
 	// constant values
-	logger     *zap.SugaredLogger
 	store      *store.Store
 	extractors *extractor.Extractors
 	session    *discordgo.Session
@@ -26,10 +25,9 @@ type Bot struct {
 }
 
 func NewBot(
-	logger *zap.SugaredLogger, store *store.Store, extractors *extractor.Extractors, token string,
+	store *store.Store, extractors *extractor.Extractors, token string,
 ) (*Bot, error) {
 	b := Bot{
-		logger:     logger.Named("bot"),
 		store:      store,
 		extractors: extractors,
 		session:    nil,
@@ -42,9 +40,6 @@ func NewBot(
 	}
 
 	b.session = sess
-	b.logger = b.logger.With(
-		zap.String("bot_id", b.GetID()),
-	)
 
 	return &b, nil
 }
@@ -65,7 +60,9 @@ func startSession(token string) (*discordgo.Session, error) {
 	return s, nil
 }
 
-func (b *Bot) Shutdown() {
+func (b *Bot) Shutdown(ctx context.Context) {
+	logger := zerolog.Ctx(ctx)
+
 	var wg sync.WaitGroup
 
 	b.guilds.Range(func(_, value any) bool {
@@ -76,7 +73,7 @@ func (b *Bot) Shutdown() {
 
 			guild, _ := value.(*Guild)
 
-			guild.gracefulShutdown()
+			guild.gracefulShutdown(ctx)
 		}()
 
 		return true
@@ -86,7 +83,7 @@ func (b *Bot) Shutdown() {
 
 	err := b.session.Close()
 	if err != nil {
-		b.logger.Errorf("Error closing session: %+v", err)
+		logger.Error().Err(err).Msg("Error closing session")
 	}
 }
 
@@ -99,9 +96,11 @@ func (b *Bot) GetToken() string {
 }
 
 func (b *Bot) FullResync(ctx context.Context) {
+	logger := zerolog.Ctx(ctx)
+
 	err := b.ResyncGuilds(ctx)
 	if err != nil {
-		b.logger.Errorf("Error resyncing guilds: %+v", err)
+		logger.Error().Err(err).Msg("Error resyncing guilds")
 
 		return
 	}
@@ -156,6 +155,8 @@ func (b *Bot) ResyncGuild(ctx context.Context, guildID string) error {
 }
 
 func (b *Bot) ResyncGuilds(ctx context.Context) error {
+	logger := zerolog.Ctx(ctx)
+
 	var guilds []*RemoteGuild
 
 	err := b.store.
@@ -170,6 +171,9 @@ func (b *Bot) ResyncGuilds(ctx context.Context) error {
 	var eg multierror.Group
 
 	for _, guild := range guilds {
+		logger := logger.With().Str("guildID", guild.ID).Logger()
+		ctx := logger.WithContext(ctx)
+
 		eg.Go(func() error {
 			return b.resyncGuild(ctx, guild)
 		})
@@ -191,7 +195,7 @@ func (b *Bot) ResyncGuildTrack(ctx context.Context, guildID string) {
 func (b *Bot) getGuild(ctx context.Context, guildID string) *Guild {
 	local, ok := b.guilds.Load(guildID)
 	if !ok {
-		local = NewGuild(ctx, guildID, b.GetID(), b.session, b.logger, b.store, b.extractors)
+		local = NewGuild(ctx, guildID, b.GetID(), b.session, b.store, b.extractors)
 		b.guilds.Store(guildID, local)
 	}
 

@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
+	"os"
 	"os/signal"
 	"syscall"
 	"time"
@@ -13,14 +15,15 @@ import (
 	pb "ProjectOrca/proto"
 	orca "ProjectOrca/service"
 	"ProjectOrca/store"
+	"ProjectOrca/utils"
 
 	"github.com/hashicorp/vault-client-go"
 	"github.com/joomcode/errorx"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	gvault "github.com/sovamorco/gommon/vault"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/migrate"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc"
 )
 
@@ -29,13 +32,37 @@ const (
 	ShutdownTimeout   = time.Second * 60
 )
 
-func main() {
-	coreLogger, err := zap.NewDevelopment(zap.IncreaseLevel(zapcore.DebugLevel))
-	if err != nil {
-		panic(err)
+type zerologWriter struct {
+	io.Writer
+	errWriter io.Writer
+}
+
+func (z *zerologWriter) WriteLevel(level zerolog.Level, p []byte) (int, error) {
+	writer := z.Writer
+	if level == zerolog.ErrorLevel {
+		writer = z.errWriter
 	}
 
-	logger := coreLogger.Sugar()
+	n, err := writer.Write(p)
+	if err != nil {
+		return 0, errorx.Decorate(err, "write")
+	}
+
+	return n, nil
+}
+
+func main() {
+	//nolint:reassign // that's the way of zerolog.
+	zerolog.ErrorStackMarshaler = utils.MarshalErrorxStack
+
+	writer := zerologWriter{
+		Writer:    os.Stdout,
+		errWriter: os.Stderr,
+	}
+
+	logger := zerolog.New(writer).With().Caller().Timestamp().Stack().Logger().Level(zerolog.DebugLevel)
+
+	log.Logger = logger
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
@@ -44,34 +71,44 @@ func main() {
 
 	var cfg *config.Config
 
-	vc, err = gvault.ClientFromEnv(ctx)
+	vc, err := gvault.ClientFromEnv(ctx)
 	if err != nil {
-		logger.Debugf("Failed to create vault client: %+v", err)
+		logger.Debug().Err(err).Msg("Failed to create vault client")
 
 		cfg, err = config.LoadConfig(ctx)
 	} else {
 		cfg, err = config.LoadConfigVault(ctx, vc)
 	}
 
-	if err != nil {
-		logger.Fatalf("Error loading config: %+v", err)
+	if cfg.UseDevLogger {
+		//nolint:exhaustruct
+		logger = logger.Level(zerolog.TraceLevel).Output(zerolog.ConsoleWriter{Out: os.Stderr})
+		log.Logger = logger
 	}
 
-	err = run(ctx, logger, vc, cfg)
 	if err != nil {
-		logger.Fatalf("Error running: %+v", err)
+		logger.Fatal().Err(err).Msg("Error loading config")
+	}
+
+	ctx = logger.WithContext(ctx)
+
+	err = run(ctx, vc, cfg)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("Error running")
 	}
 }
 
 func run(
-	ctx context.Context, logger *zap.SugaredLogger, vc *vault.Client, cfg *config.Config,
+	ctx context.Context, vc *vault.Client, cfg *config.Config,
 ) error {
-	st := store.NewStore(ctx, logger, &store.Config{
+	logger := zerolog.Ctx(ctx)
+
+	st := store.NewStore(ctx, &store.Config{
 		DB:     cfg.DB,
 		Broker: cfg.Redis,
 	}, vc)
 
-	err := doMigrate(ctx, logger, st.DB)
+	err := doMigrate(ctx, st.DB)
 	if err != nil {
 		return errorx.Decorate(err, "do migrations")
 	}
@@ -85,7 +122,7 @@ func run(
 		return errorx.Decorate(err, "listen")
 	}
 
-	srv, err := orca.New(ctx, logger, st, cfg)
+	srv, err := orca.New(ctx, st, cfg)
 	if err != nil {
 		return errorx.Decorate(err, "create orca server")
 	}
@@ -95,7 +132,10 @@ func run(
 		return errorx.Decorate(err, "init orca server")
 	}
 
-	grpcServer := grpc.NewServer()
+	grpcServer := grpc.NewServer(
+		grpc.UnaryInterceptor(srv.UnaryInterceptor),
+		grpc.StreamInterceptor(srv.StreamInterceptor),
+	)
 	pb.RegisterOrcaServer(grpcServer, srv)
 
 	serverErrors := make(chan error, 1)
@@ -103,31 +143,35 @@ func run(
 		serverErrors <- grpcServer.Serve(lis)
 	}()
 
-	defer func() {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), ShutdownTimeout)
-		defer cancel()
+	defer shutdown(ctx, srv, grpcServer)
 
-		srv.ShutdownStreams()
-
-		grpcServer.GracefulStop()
-
-		srv.Shutdown(shutdownCtx)
-	}()
-
-	logger.Infof("Started gRPC server on port %d", port)
+	logger.Info().Int("port", port).Msg("Started gRPC server")
 
 	select {
 	case err = <-serverErrors:
 		return errorx.Decorate(err, "listen")
 	case <-ctx.Done():
-		logger.Infof("Exiting: Context cancelled")
+		logger.Info().Msg("Exiting: Context cancelled")
 
 		return nil
 	}
 }
 
-func doMigrate(ctx context.Context, logger *zap.SugaredLogger, db *bun.DB) error {
-	logger = logger.Named("migrate")
+func shutdown(ctx context.Context, srv *orca.Orca, grpcServer *grpc.Server) {
+	parent := context.WithoutCancel(ctx)
+
+	shutdownCtx, cancel := context.WithTimeout(parent, ShutdownTimeout)
+	defer cancel()
+
+	srv.ShutdownStreams()
+
+	grpcServer.GracefulStop()
+
+	srv.Shutdown(shutdownCtx)
+}
+
+func doMigrate(ctx context.Context, db *bun.DB) error {
+	logger := zerolog.Ctx(ctx)
 
 	migrateContext, migrateCancel := context.WithTimeout(ctx, MigrationsTimeout)
 	defer migrateCancel()
@@ -151,7 +195,7 @@ func doMigrate(ctx context.Context, logger *zap.SugaredLogger, db *bun.DB) error
 	defer func(migrator *migrate.Migrator, ctx context.Context) {
 		err := migrator.Unlock(ctx)
 		if err != nil {
-			logger.Errorf("Error unlocking migrator: %+v", err)
+			logger.Error().Err(err).Msg("Error unlocking migrator")
 		}
 	}(migrator, ctx)
 
@@ -161,9 +205,9 @@ func doMigrate(ctx context.Context, logger *zap.SugaredLogger, db *bun.DB) error
 	}
 
 	if group.IsZero() {
-		logger.Debug("No migrations to run")
+		logger.Debug().Msg("No migrations to run")
 	} else {
-		logger.Infof("Ran %d migrations", len(group.Migrations))
+		logger.Info().Int("migrations", len(group.Migrations)).Msg("Ran migrations")
 	}
 
 	return nil

@@ -11,7 +11,7 @@ import (
 
 	"github.com/joomcode/errorx"
 	"github.com/redis/go-redis/v9"
-	"go.uber.org/zap"
+	"github.com/rs/zerolog"
 )
 
 type ResyncTarget int
@@ -38,7 +38,9 @@ func (o *Orca) initBroker(ctx context.Context) {
 	)
 }
 
-func (o *Orca) handleResync(ctx context.Context, logger *zap.SugaredLogger, msg *redis.Message) error {
+func (o *Orca) handleResync(ctx context.Context, msg *redis.Message) error {
+	logger := zerolog.Ctx(ctx)
+
 	r := new(ResyncMessage)
 
 	err := json.Unmarshal([]byte(msg.Payload), r)
@@ -46,14 +48,18 @@ func (o *Orca) handleResync(ctx context.Context, logger *zap.SugaredLogger, msg 
 		return errorx.Decorate(err, "unmarshal resync")
 	}
 
+	tl := logger.With().Str("botID", r.Bot).Str("guildID", r.Guild).Logger()
+	logger = &tl
+	ctx = logger.WithContext(ctx)
+
 	managed := o.getStateByID(r.Bot)
 	if managed == nil {
-		logger.Debugf("Resync message for non-managed recipient %s, skipping", r.Bot)
+		logger.Debug().Msg("Resync message for non-managed recipient, skipping")
 
 		return nil
 	}
 
-	o.doResync(ctx, logger, managed, r)
+	o.doResync(ctx, managed, r)
 
 	return nil
 }
@@ -70,7 +76,9 @@ func (o *Orca) getStateByID(id string) *models.Bot {
 	return state
 }
 
-func (o *Orca) doResync(ctx context.Context, logger *zap.SugaredLogger, managed *models.Bot, r *ResyncMessage) {
+func (o *Orca) doResync(ctx context.Context, managed *models.Bot, r *ResyncMessage) {
+	logger := zerolog.Ctx(ctx)
+
 	var wg sync.WaitGroup
 
 	for _, target := range r.Targets {
@@ -83,7 +91,7 @@ func (o *Orca) doResync(ctx context.Context, logger *zap.SugaredLogger, managed 
 			case ResyncTargetGuild:
 				err := managed.ResyncGuild(ctx, r.Guild)
 				if err != nil {
-					logger.Errorf("Error resyncing guild: %+v", err)
+					logger.Error().Err(err).Msg("Error resyncing guild")
 				}
 			case ResyncTargetCurrent:
 				managed.ResyncGuildTrack(ctx, r.Guild)
@@ -118,23 +126,21 @@ func (o *Orca) queueStartResync(ctx context.Context, guild *models.RemoteGuild, 
 
 		_, err := guild.UpdateQuery(o.store).Column("channel_id").Exec(ctx)
 		if err != nil {
-			o.logger.Errorf("Error updating guild channel id: %+v", err)
-
-			return ErrInternal
+			return errorx.Decorate(err, "update guild channel id")
 		}
 	}
 
 	err := o.sendResync(ctx, botID, guild.ID, ResyncTargetCurrent, ResyncTargetGuild)
 	if err != nil {
-		o.logger.Errorf("Error sending resync message: %+v", err)
-
-		return ErrInternal
+		return errorx.Decorate(err, "send resync")
 	}
 
 	return nil
 }
 
-func (o *Orca) handleKeyDel(ctx context.Context, logger *zap.SugaredLogger, msg *redis.Message) error {
+func (o *Orca) handleKeyDel(ctx context.Context, msg *redis.Message) error {
+	logger := zerolog.Ctx(ctx)
+
 	val := msg.Payload
 	pref := o.store.RedisPrefix + ":"
 
@@ -144,14 +150,18 @@ func (o *Orca) handleKeyDel(ctx context.Context, logger *zap.SugaredLogger, msg 
 
 	val = strings.TrimPrefix(val, pref)
 
+	tl := logger.With().Str("stateId", val).Logger()
+	logger = &tl
+	ctx = logger.WithContext(ctx)
+
 	_, exists := o.states.Load(val)
 	if exists {
-		logger.Fatalf("Own managed state %s expired", val) // TODO: gracefully remove this state?
+		logger.Fatal().Msg("Own managed state expired") // TODO: gracefully remove this state?
 
 		return nil // never reached because logger.Fatal calls os.Exit, more of an IDE/linter hint
 	}
 
-	logger.Infof("Lock for %s expired, trying takeover", val)
+	logger.Info().Msg("Lock expired, trying takeover")
 
 	err := o.initFromStore(ctx)
 	if err != nil {

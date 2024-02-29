@@ -14,7 +14,7 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/joomcode/errorx"
-	"go.uber.org/zap"
+	"github.com/rs/zerolog"
 )
 
 const (
@@ -28,13 +28,16 @@ const (
 	bufferMilliseconds = 500 // also dynaudnorm (possibly) has its own buffer
 	bufferPackets      = bufferMilliseconds / frameSizeMs
 
-	storeInterval = 1000 * time.Millisecond
+	storeInterval = 1 * time.Second
 
 	playLoopSleep = 50 * time.Millisecond
 
 	opusSendTimeout = 1 * time.Second
 
 	cmdWaitTimeout = 5 * time.Second
+
+	checkVCPeriod  = 200 * time.Millisecond
+	checkVCTimeout = 10 * time.Second
 )
 
 type posMsg struct {
@@ -47,7 +50,6 @@ type Guild struct {
 	id         string
 	botID      string
 	botSession *discordgo.Session
-	logger     *zap.SugaredLogger
 	store      *store.Store
 	extractors *extractor.Extractors
 
@@ -55,8 +57,6 @@ type Guild struct {
 	posChan chan posMsg
 
 	// signal channels
-	storeLoopDone chan struct{}
-	playLoopDone  chan struct{}
 	resync        chan struct{}
 	resyncPlaying chan struct{}
 	playing       chan struct{}
@@ -70,25 +70,18 @@ func NewGuild(
 	ctx context.Context,
 	id, botID string,
 	botSession *discordgo.Session,
-	logger *zap.SugaredLogger,
 	store *store.Store,
 	extractors *extractor.Extractors,
 ) *Guild {
-	logger = logger.Named("guild").With(
-		zap.String("guild_id", id),
-	)
 	g := &Guild{
 		id:         id,
 		botID:      botID,
 		botSession: botSession,
-		logger:     logger,
 		store:      store,
 		extractors: extractors,
 
 		posChan: make(chan posMsg, 1),
 
-		storeLoopDone: make(chan struct{}, 1),
-		playLoopDone:  make(chan struct{}, 1),
 		resync:        make(chan struct{}, 1),
 		resyncPlaying: make(chan struct{}, 1),
 		playing:       make(chan struct{}, 1),
@@ -96,8 +89,8 @@ func NewGuild(
 		vc: nil,
 	}
 
-	go g.storeLoop(context.WithoutCancel(ctx))
-	go g.playLoop(context.WithoutCancel(ctx))
+	go g.storeLoop(ctx)
+	go g.playLoop(ctx)
 
 	return g
 }
@@ -109,26 +102,17 @@ func (g *Guild) getVC() *discordgo.VoiceConnection {
 	return g.vc
 }
 
-func (g *Guild) gracefulShutdown() {
+func (g *Guild) gracefulShutdown(ctx context.Context) {
+	logger := zerolog.Ctx(ctx)
+
 	if g.getVC() != nil {
 		g.vcMu.Lock()
 		err := g.vc.Disconnect()
 		g.vcMu.Unlock()
 
 		if err != nil {
-			g.logger.Errorf("Error disconnecting from voice channel: %+v", err)
+			logger.Error().Err(err).Msg("Error disconnecting from voice channel")
 		}
-	}
-
-	// just in case - make sure these do not block
-	select {
-	case g.storeLoopDone <- struct{}{}:
-	default:
-	}
-
-	select {
-	case g.playLoopDone <- struct{}{}:
-	default:
 	}
 }
 
@@ -141,12 +125,14 @@ func (g *Guild) ResyncPlaying() {
 }
 
 func (g *Guild) storeLoop(ctx context.Context) {
+	logger := zerolog.Ctx(ctx)
+
 	ticker := time.NewTicker(storeInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-g.storeLoopDone:
+		case <-ctx.Done():
 			return
 		case pos := <-g.posChan:
 			// check if ticker passed
@@ -163,7 +149,10 @@ func (g *Guild) storeLoop(ctx context.Context) {
 				Where("id = ?", pos.id).
 				Exec(ctx)
 			if err != nil {
-				g.logger.Errorf("Error storing track position: %+v", err)
+				logger.Error().
+					Str("trackId", pos.id).
+					Float64("pos", pos.pos.Seconds()).
+					Err(err).Msg("Error storing track position")
 			}
 		}
 	}
@@ -185,20 +174,20 @@ func (g *Guild) getNextTrack(ctx context.Context) (*RemoteTrack, error) {
 }
 
 func (g *Guild) playLoop(ctx context.Context) {
-	track := NewTrack(g)
+	logger := zerolog.Ctx(ctx)
+
+	track := NewTrack(ctx, g)
 
 	var err error
 
 	for {
 		err = g.playLoopPreconditions(ctx, track)
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
 
-		switch {
-		case errors.Is(err, ErrShuttingDown):
-			track.shutdown()
-
-			return
-		case err != nil:
-			g.logger.Errorf("Failed play loop preconditions: %+v", err)
+			logger.Error().Err(err).Msg("Failed play loop preconditions")
 
 			time.Sleep(playLoopSleep)
 
@@ -211,14 +200,14 @@ func (g *Guild) playLoop(ctx context.Context) {
 func (g *Guild) playLoopPreconditions(ctx context.Context, track *Track) error {
 	// if we need to resync playing - reset current playing track
 	select {
-	case <-g.playLoopDone:
-		track.clean()
+	case <-ctx.Done():
+		track.clean(ctx)
 
-		return ErrShuttingDown
+		return context.Canceled
 	case <-g.resyncPlaying:
-		track.clean()
+		track.clean(ctx)
 
-		go notifications.SendQueueNotificationLog(ctx, g.logger, g.store, g.botID, g.id)
+		go notifications.SendQueueNotificationLog(ctx, g.store, g.botID, g.id)
 	default:
 	}
 
@@ -239,8 +228,8 @@ func (g *Guild) playLoopPreconditions(ctx context.Context, track *Track) error {
 
 	// try to consume playing from itself to verify that the track is, indeed, playing
 	select {
-	case <-g.playLoopDone:
-		return ErrShuttingDown
+	case <-ctx.Done():
+		return context.Canceled
 	case g.playing <- <-g.playing:
 	}
 
@@ -249,6 +238,10 @@ func (g *Guild) playLoopPreconditions(ctx context.Context, track *Track) error {
 
 func (g *Guild) vcPrecondition(ctx context.Context) error {
 	if vc := g.getVC(); vc != nil {
+		if !vc.Ready {
+			g.waitForReady(ctx)
+		}
+
 		return nil
 	}
 
@@ -258,6 +251,24 @@ func (g *Guild) vcPrecondition(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (g *Guild) waitForReady(ctx context.Context) {
+	readyTimeout := time.After(checkVCTimeout)
+
+	for {
+		select {
+		case <-time.After(checkVCPeriod):
+			vc := g.getVC()
+			if vc == nil || vc.Ready {
+				return
+			}
+		case <-readyTimeout:
+			return
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 func (g *Guild) checkForVC(ctx context.Context) error {
@@ -277,8 +288,8 @@ func (g *Guild) checkForVC(ctx context.Context) error {
 
 	// wait for resync
 	select {
-	case <-g.playLoopDone:
-		return ErrShuttingDown
+	case <-ctx.Done():
+		return context.Canceled
 	case <-g.resync:
 	}
 

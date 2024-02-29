@@ -13,8 +13,8 @@ import (
 	pb "ProjectOrca/proto"
 
 	"github.com/joomcode/errorx"
+	"github.com/rs/zerolog"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 const (
@@ -34,32 +34,24 @@ var ErrQueueTooLarge = utils.MustCreateStatus(codes.OutOfRange,
 	}).Err()
 
 func (o *Orca) Play(ctx context.Context, in *pb.PlayRequest) (*pb.PlayReply, error) {
-	bot, guild, err := o.authenticateWithGuild(ctx, in.GuildID)
+	bot, guild, err := parseGuildContext(ctx)
 	if err != nil {
-		o.logger.Errorf("Error authenticating request: %+v", err)
-
-		return nil, ErrFailedToAuthenticate
+		return nil, errorx.Decorate(err, "parse authenticated context")
 	}
 
 	tracksData, total, affectedFirst, err := o.addTracks(ctx, bot, guild, in.Url, int(in.Position))
 	if err != nil {
-		if statusErr, ok := status.FromError(err); ok {
-			return nil, statusErr.Err()
-		}
-
-		o.logger.Errorf("Error adding tracks: %+v", err)
-
-		return nil, ErrInternal
+		return nil, errorx.Decorate(err, "add tracks")
 	}
 
 	// that concerns current track and guild voice state
 	if affectedFirst {
 		err = o.queueStartResync(ctx, guild, bot.ID, in.ChannelID)
 		if err != nil {
-			return nil, err
+			return nil, errorx.Decorate(err, "resync guild")
 		}
 	} else {
-		go notifications.SendQueueNotificationLog(context.WithoutCancel(ctx), o.logger, o.store, bot.ID, guild.ID)
+		go notifications.SendQueueNotificationLog(context.WithoutCancel(ctx), o.store, bot.ID, guild.ID)
 	}
 
 	return &pb.PlayReply{
@@ -112,6 +104,8 @@ func (o *Orca) addTracks(
 func (o *Orca) chooseOrdKeyRange(
 	ctx context.Context, guild *models.RemoteGuild, qlen, position int,
 ) (float64, float64, bool) {
+	logger := zerolog.Ctx(ctx)
+
 	// special case - if no tracks in queue - insert all tracks with ordkeys from 0 to 100
 	if qlen == 0 {
 		return defaultPrevOrdKey, defaultNextOrdKey, true
@@ -133,7 +127,7 @@ func (o *Orca) chooseOrdKeyRange(
 		Limit(2).                   //nolint:gomnd // previous and next track in theory
 		Rows(ctx)
 	if err != nil {
-		o.logger.Errorf("Error getting ordkeys from store: %+v", err)
+		logger.Error().Err(err).Msg("Error getting ordkeys from store")
 
 		return defaultPrevOrdKey, defaultNextOrdKey, true
 	}
@@ -141,20 +135,22 @@ func (o *Orca) chooseOrdKeyRange(
 	defer func() {
 		err = rows.Close()
 		if err != nil {
-			o.logger.Errorf("Error closing rows: %+v", err)
+			logger.Error().Err(err).Msg("Error closing rows")
 		}
 	}()
 
-	return o.chooseOrdKeyRangeFromRows(position, rows)
+	return o.chooseOrdKeyRangeFromRows(ctx, position, rows)
 }
 
-func (o *Orca) chooseOrdKeyRangeFromRows(position int, rows *sql.Rows) (float64, float64, bool) {
+func (o *Orca) chooseOrdKeyRangeFromRows(ctx context.Context, position int, rows *sql.Rows) (float64, float64, bool) {
+	logger := zerolog.Ctx(ctx)
+
 	var prevOrdKey, nextOrdKey float64
 
 	rows.Next()
 
 	if err := rows.Err(); err != nil {
-		o.logger.Errorf("Error getting next row: %+v", err)
+		logger.Error().Err(err).Msg("Error getting next row")
 
 		return defaultPrevOrdKey, defaultNextOrdKey, true
 	}
@@ -163,7 +159,7 @@ func (o *Orca) chooseOrdKeyRangeFromRows(position int, rows *sql.Rows) (float64,
 	if position == 0 {
 		err := rows.Scan(&nextOrdKey)
 		if err != nil {
-			o.logger.Errorf("Error scanning track 0 from store: %+v", err)
+			logger.Error().Err(err).Msg("Error scanning track 0 from store")
 
 			return defaultPrevOrdKey, defaultNextOrdKey, true
 		}
@@ -175,7 +171,7 @@ func (o *Orca) chooseOrdKeyRangeFromRows(position int, rows *sql.Rows) (float64,
 
 	err := rows.Scan(&prevOrdKey)
 	if err != nil {
-		o.logger.Errorf("Error scanning prev track from store: %+v", err)
+		logger.Error().Err(err).Msg("Error scanning prev track from store")
 
 		return defaultPrevOrdKey, defaultNextOrdKey, true
 	}
@@ -183,7 +179,7 @@ func (o *Orca) chooseOrdKeyRangeFromRows(position int, rows *sql.Rows) (float64,
 	// special case - there is no track succeeding the position, nextOrdKey should be prevOrdKey + 100
 	if !rows.Next() {
 		if err := rows.Err(); err != nil {
-			o.logger.Errorf("Error getting next row: %+v", err)
+			logger.Error().Err(err).Msg("Error getting next row")
 
 			return defaultPrevOrdKey, defaultNextOrdKey, true
 		}
@@ -192,7 +188,7 @@ func (o *Orca) chooseOrdKeyRangeFromRows(position int, rows *sql.Rows) (float64,
 	} else {
 		err = rows.Scan(&nextOrdKey)
 		if err != nil {
-			o.logger.Errorf("Error scanning next track from store: %+v", err)
+			logger.Error().Err(err).Msg("Error scanning next track from store")
 
 			return defaultPrevOrdKey, defaultNextOrdKey, true
 		}

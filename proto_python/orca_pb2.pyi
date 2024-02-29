@@ -140,12 +140,10 @@ class LoadPlaylistRequest(_message.Message):
     def __init__(self, guildID: _Optional[str] = ..., playlistID: _Optional[str] = ..., channelID: _Optional[str] = ...) -> None: ...
 
 class ListPlaylistsRequest(_message.Message):
-    __slots__ = ("guildID", "userID")
-    GUILDID_FIELD_NUMBER: _ClassVar[int]
+    __slots__ = ("userID",)
     USERID_FIELD_NUMBER: _ClassVar[int]
-    guildID: str
     userID: str
-    def __init__(self, guildID: _Optional[str] = ..., userID: _Optional[str] = ...) -> None: ...
+    def __init__(self, userID: _Optional[str] = ...) -> None: ...
 
 class ListPlaylistsReply(_message.Message):
     __slots__ = ("playlists",)

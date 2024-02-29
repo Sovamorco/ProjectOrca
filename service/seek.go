@@ -5,17 +5,15 @@ import (
 
 	"ProjectOrca/models"
 	pb "ProjectOrca/proto"
+
+	"github.com/joomcode/errorx"
 )
 
 func (o *Orca) Seek(ctx context.Context, in *pb.SeekRequest) (*pb.SeekReply, error) {
-	bot, guild, err := o.authenticateWithGuild(ctx, in.GuildID)
+	bot, guild, err := parseGuildContext(ctx)
 	if err != nil {
-		o.logger.Errorf("Error authenticating request: %+v", err)
-
-		return nil, ErrFailedToAuthenticate
+		return nil, errorx.Decorate(err, "parse authenticated context")
 	}
-
-	o.logger.Infof("Seeking to %.2fs in guild %s", in.Position.AsDuration().Seconds(), in.GuildID)
 
 	_, err = o.store.
 		NewUpdate().
@@ -26,16 +24,12 @@ func (o *Orca) Seek(ctx context.Context, in *pb.SeekRequest) (*pb.SeekReply, err
 		Where("tracks.id = curr.id").
 		Exec(ctx)
 	if err != nil {
-		o.logger.Errorf("Error changing track position: %+v", err)
-
-		return nil, ErrInternal
+		return nil, errorx.Decorate(err, "seek to position")
 	}
 
 	err = o.sendResync(ctx, bot.ID, guild.ID, ResyncTargetCurrent)
 	if err != nil {
-		o.logger.Errorf("Error sending resync target")
-
-		return nil, ErrInternal
+		return nil, errorx.Decorate(err, "send resync")
 	}
 
 	return &pb.SeekReply{}, nil

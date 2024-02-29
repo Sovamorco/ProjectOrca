@@ -8,20 +8,22 @@ import (
 
 	"github.com/go-redsync/redsync/v4"
 	"github.com/joomcode/errorx"
+	"github.com/rs/zerolog"
 
 	"github.com/redis/go-redis/v9"
-	"go.uber.org/zap"
 )
 
-type MessageHandler func(context.Context, *zap.SugaredLogger, *redis.Message) error
+type MessageHandler func(context.Context, *redis.Message) error
 
 func (s *Store) Subscribe(ctx context.Context, mh MessageHandler, channels ...string) {
+	logger := zerolog.Ctx(ctx)
+
 	ps := s.Client.Subscribe(ctx, channels...)
 
 	s.unsubscribeFuncs = append(s.unsubscribeFuncs, func(ctx context.Context) {
 		err := ps.Unsubscribe(ctx, channels...)
 		if err != nil {
-			s.logger.Errorf("Error unsubscribing from channels: %+v", err)
+			logger.Error().Err(err).Msg("Error unsubscribing from channels")
 		}
 	})
 
@@ -29,7 +31,7 @@ func (s *Store) Subscribe(ctx context.Context, mh MessageHandler, channels ...st
 }
 
 func (s *Store) subscriptionHandler(ctx context.Context, mh MessageHandler, ch <-chan *redis.Message) {
-	logger := s.logger.Named("sub_handler")
+	logger := zerolog.Ctx(ctx).With().Str("component", "subscriptionHandler").Logger()
 
 	var wg sync.WaitGroup
 
@@ -48,13 +50,12 @@ loop:
 			}
 		}
 
-		logger := logger.With(
-			zap.String("channel", msg.Channel),
-		)
+		logger := logger.With().Str("channel", msg.Channel).Logger()
+		ctx := logger.WithContext(ctx)
 
 		// ignore messages from keyevent del channel
 		if msg.Channel == "__keyevent@0__:del" {
-			logger = zap.NewNop().Sugar()
+			logger = logger.Level(zerolog.Disabled)
 		}
 
 		wg.Add(1)
@@ -62,11 +63,11 @@ loop:
 		go func() {
 			defer wg.Done()
 
-			logger.Debugf("Received message: %s", msg.Payload)
+			logger.Debug().Str("payload", msg.Payload).Msg("Received message")
 
-			err := mh(ctx, logger, msg)
+			err := mh(ctx, msg)
 			if err != nil {
-				logger.Errorf("Error processing message: %+v", err)
+				logger.Error().Err(err).Msg("Error processing message")
 			}
 		}()
 	}
@@ -75,8 +76,13 @@ loop:
 }
 
 func (s *Store) Lock(ctx context.Context, key string) error {
+	lockName := fmt.Sprintf("%s:%s", s.RedisPrefix, key)
+
+	logger := zerolog.Ctx(ctx).With().Str("lockName", lockName).Logger()
+	ctx = logger.WithContext(ctx)
+
 	mu := s.rs.NewMutex(
-		fmt.Sprintf("%s:%s", s.RedisPrefix, key),
+		lockName,
 		redsync.WithExpiry(lockExpiry),
 		redsync.WithTries(lockTries),
 	)
@@ -91,7 +97,7 @@ func (s *Store) Lock(ctx context.Context, key string) error {
 	s.shutdownFuncs = append(s.shutdownFuncs, func(ctx context.Context) {
 		_, err := mu.UnlockContext(ctx)
 		if err != nil {
-			s.logger.Errorf("Error unlocking state: %+v", err)
+			logger.Error().Err(err).Msg("Error unlocking state")
 		}
 	})
 
@@ -99,13 +105,15 @@ func (s *Store) Lock(ctx context.Context, key string) error {
 }
 
 func (s *Store) extendLoop(ctx context.Context, mu *redsync.Mutex) {
+	logger := zerolog.Ctx(ctx)
+
 	ticker := time.NewTicker(lockExtendFrequency)
 	defer ticker.Stop()
 
 	for {
 		_, err := mu.ExtendContext(ctx)
 		if err != nil {
-			s.logger.Errorf("Error extending lock: %+v", err)
+			logger.Error().Err(err).Msg("Error extending lock")
 		}
 
 		select {

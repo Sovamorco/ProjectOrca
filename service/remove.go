@@ -9,15 +9,14 @@ import (
 	"ProjectOrca/models/notifications"
 	pb "ProjectOrca/proto"
 
+	"github.com/joomcode/errorx"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 func (o *Orca) Remove(ctx context.Context, in *pb.RemoveRequest) (*emptypb.Empty, error) {
-	bot, guild, err := o.authenticateWithGuild(ctx, in.GuildID)
+	bot, guild, err := parseGuildContext(ctx)
 	if err != nil {
-		o.logger.Errorf("Error authenticating request: %+v", err)
-
-		return nil, ErrFailedToAuthenticate
+		return nil, errorx.Decorate(err, "parse authenticated context")
 	}
 
 	// should be at least 0
@@ -35,20 +34,16 @@ func (o *Orca) Remove(ctx context.Context, in *pb.RemoveRequest) (*emptypb.Empty
 			return &emptypb.Empty{}, nil
 		}
 
-		o.logger.Errorf("Error deleting track from queue: %+v", err)
-
-		return nil, ErrInternal
+		return nil, errorx.Decorate(err, "remove track")
 	}
 
 	if position == 0 {
 		err = o.sendResync(ctx, bot.ID, guild.ID, ResyncTargetCurrent)
 		if err != nil {
-			o.logger.Errorf("Error sending resync: %+v", err)
-
-			return nil, ErrInternal
+			return nil, errorx.Decorate(err, "send resync")
 		}
 	} else {
-		go notifications.SendQueueNotificationLog(context.WithoutCancel(ctx), o.logger, o.store, bot.ID, guild.ID)
+		go notifications.SendQueueNotificationLog(context.WithoutCancel(ctx), o.store, bot.ID, guild.ID)
 	}
 
 	return &emptypb.Empty{}, nil

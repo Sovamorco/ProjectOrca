@@ -8,12 +8,18 @@ import (
 	"ProjectOrca/models"
 
 	"github.com/joomcode/errorx"
+	"github.com/rs/zerolog"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
-func (o *Orca) authenticate(ctx context.Context) (*models.RemoteBot, error) {
+type (
+	botKey   struct{}
+	guildKey struct{}
+)
+
+func (o *Orca) authenticate(ctx context.Context) (context.Context, error) {
 	token, err := o.parseIncomingContext(ctx)
 	if err != nil {
 		return nil, errorx.Decorate(err, "parse context")
@@ -27,24 +33,37 @@ func (o *Orca) authenticate(ctx context.Context) (*models.RemoteBot, error) {
 		Where("token = ?", token).
 		Scan(ctx)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return o.register(ctx, token)
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, errorx.Decorate(err, "get state from store")
 		}
 
-		return nil, errorx.Decorate(err, "get state from store")
+		bot, ierr := o.register(ctx, token)
+		if ierr != nil {
+			return nil, errorx.Decorate(ierr, "register bot")
+		}
+
+		s = *bot
 	}
 
-	return &s, nil
+	logger := zerolog.Ctx(ctx).With().Str("botID", s.ID).Logger()
+	ctx = logger.WithContext(ctx)
+	ctx = context.WithValue(ctx, botKey{}, &s)
+
+	return ctx, nil
 }
 
 func (o *Orca) authenticateWithGuild(ctx context.Context, guildID string) (
-	*models.RemoteBot,
-	*models.RemoteGuild,
+	context.Context,
 	error,
 ) {
-	bot, err := o.authenticate(ctx)
+	ctx, err := o.authenticate(ctx)
 	if err != nil {
-		return nil, nil, errorx.Decorate(err, "authenticate bot")
+		return nil, errorx.Decorate(err, "authenticate bot")
+	}
+
+	bot, err := parseBotContext(ctx)
+	if err != nil {
+		return nil, errorx.Decorate(err, "parse bot context")
 	}
 
 	var r models.RemoteGuild
@@ -57,24 +76,29 @@ func (o *Orca) authenticateWithGuild(ctx context.Context, guildID string) (
 		WherePK().
 		Scan(ctx)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			g := models.NewRemoteGuild(bot.ID, guildID)
-
-			_, err = o.store.
-				NewInsert().
-				Model(g).
-				Exec(ctx)
-			if err != nil {
-				return nil, nil, errorx.Decorate(err, "create guild")
-			}
-
-			return bot, g, nil
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, errorx.Decorate(err, "get guild from store")
 		}
 
-		return nil, nil, errorx.Decorate(err, "get guild from store")
+		g := models.NewRemoteGuild(bot.ID, guildID)
+
+		_, err = o.store.
+			NewInsert().
+			Model(g).
+			Exec(ctx)
+		if err != nil {
+			return nil, errorx.Decorate(err, "create guild")
+		}
+
+		r = *g
 	}
 
-	return bot, &r, nil
+	logger := zerolog.Ctx(ctx).With().Str("guildID", r.ID).Logger()
+	ctx = logger.WithContext(ctx)
+	ctx = context.WithValue(ctx, botKey{}, bot)
+	ctx = context.WithValue(ctx, guildKey{}, &r)
+
+	return ctx, nil
 }
 
 func (o *Orca) parseIncomingContext(ctx context.Context) (string, error) {
@@ -94,7 +118,7 @@ func (o *Orca) parseIncomingContext(ctx context.Context) (string, error) {
 }
 
 func (o *Orca) register(ctx context.Context, token string) (*models.RemoteBot, error) {
-	state, err := models.NewBot(o.logger, o.store, o.extractors, token)
+	state, err := models.NewBot(o.store, o.extractors, token)
 	if err != nil {
 		return nil, errorx.Decorate(err, "create local bot state")
 	}
@@ -108,7 +132,7 @@ func (o *Orca) register(ctx context.Context, token string) (*models.RemoteBot, e
 		Set("token = EXCLUDED.token").
 		Exec(ctx)
 	if err != nil {
-		state.Shutdown()
+		state.Shutdown(ctx)
 
 		return nil, errorx.Decorate(err, "store remote bot state")
 	}
@@ -116,4 +140,27 @@ func (o *Orca) register(ctx context.Context, token string) (*models.RemoteBot, e
 	o.states.Store(state.GetID(), state)
 
 	return r, nil
+}
+
+func parseBotContext(ctx context.Context) (*models.RemoteBot, error) {
+	bot, ok := ctx.Value(botKey{}).(*models.RemoteBot)
+	if !ok {
+		return nil, errorx.IllegalState.New("missing bot")
+	}
+
+	return bot, nil
+}
+
+func parseGuildContext(ctx context.Context) (*models.RemoteBot, *models.RemoteGuild, error) {
+	bot, err := parseBotContext(ctx)
+	if err != nil {
+		return nil, nil, errorx.Decorate(err, "parse bot context")
+	}
+
+	guild, ok := ctx.Value(guildKey{}).(*models.RemoteGuild)
+	if !ok {
+		return nil, nil, errorx.IllegalState.New("missing guild")
+	}
+
+	return bot, guild, nil
 }

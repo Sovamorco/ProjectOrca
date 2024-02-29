@@ -9,15 +9,14 @@ import (
 	"ProjectOrca/models"
 	pb "ProjectOrca/proto"
 
+	"github.com/joomcode/errorx"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 func (o *Orca) GetTracks(ctx context.Context, in *pb.GetTracksRequest) (*pb.GetTracksReply, error) {
-	bot, guild, err := o.authenticateWithGuild(ctx, in.GuildID)
+	bot, guild, err := parseGuildContext(ctx)
 	if err != nil {
-		o.logger.Errorf("Error authenticating request: %+v", err)
-
-		return nil, ErrFailedToAuthenticate
+		return nil, errorx.Decorate(err, "parse authenticated context")
 	}
 
 	var tracks []*models.RemoteTrack
@@ -32,9 +31,7 @@ func (o *Orca) GetTracks(ctx context.Context, in *pb.GetTracksRequest) (*pb.GetT
 		Limit(int(in.End - in.Start)).
 		Scan(ctx)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		o.logger.Errorf("Error getting tracks: %+v", err)
-
-		return nil, ErrInternal
+		return nil, errorx.Decorate(err, "get tracks")
 	}
 
 	res := make([]*pb.TrackData, len(tracks))
@@ -49,12 +46,10 @@ func (o *Orca) GetTracks(ctx context.Context, in *pb.GetTracksRequest) (*pb.GetT
 	}, nil
 }
 
-func (o *Orca) GetQueueState(ctx context.Context, in *pb.GuildOnlyRequest) (*pb.GetQueueStateReply, error) {
-	bot, guild, err := o.authenticateWithGuild(ctx, in.GuildID)
+func (o *Orca) GetQueueState(ctx context.Context, _ *pb.GuildOnlyRequest) (*pb.GetQueueStateReply, error) {
+	bot, guild, err := parseGuildContext(ctx)
 	if err != nil {
-		o.logger.Errorf("Error authenticating request: %+v", err)
-
-		return nil, ErrFailedToAuthenticate
+		return nil, errorx.Decorate(err, "parse authenticated context")
 	}
 
 	var qlen int
@@ -79,9 +74,7 @@ func (o *Orca) GetQueueState(ctx context.Context, in *pb.GuildOnlyRequest) (*pb.
 
 	err = q.Scan(ctx, &qlen, &remaining)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		o.logger.Errorf("Error getting queue length: %+v", err)
-
-		return nil, ErrInternal
+		return nil, errorx.Decorate(err, "get queue state")
 	}
 
 	return &pb.GetQueueStateReply{

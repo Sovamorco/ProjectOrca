@@ -25,7 +25,8 @@ type VK struct {
 }
 
 type Config struct {
-	Port int `mapstructure:"port"`
+	Port         int  `mapstructure:"port"`
+	UseDevLogger bool `mapstructure:"use_dev_logger"`
 
 	Spotify *Spotify          `mapstructure:"spotify"`
 	VK      *VK               `mapstructure:"vk"`

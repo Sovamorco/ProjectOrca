@@ -15,6 +15,7 @@ import (
 	"ProjectOrca/models/notifications"
 
 	"github.com/joomcode/errorx"
+	"github.com/rs/zerolog"
 )
 
 const (
@@ -35,11 +36,10 @@ type Track struct {
 	cmd    *exec.Cmd
 	stream io.ReadCloser
 
-	sendLoopDone chan struct{}
-	packetChan   chan []byte
+	packetChan chan []byte
 }
 
-func NewTrack(guild *Guild) *Track {
+func NewTrack(ctx context.Context, guild *Guild) *Track {
 	t := &Track{
 		g: guild,
 
@@ -47,21 +47,12 @@ func NewTrack(guild *Guild) *Track {
 		cmd:    nil,
 		stream: nil,
 
-		sendLoopDone: make(chan struct{}, 1),
-		packetChan:   make(chan []byte, packetBurstNum),
+		packetChan: make(chan []byte, packetBurstNum),
 	}
 
-	go t.sendLoop()
+	go t.sendLoop(ctx)
 
 	return t
-}
-
-func (t *Track) shutdown() {
-	// make sure this does not block
-	select {
-	case t.sendLoopDone <- struct{}{}:
-	default:
-	}
 }
 
 func (t *Track) initialized() bool {
@@ -80,7 +71,7 @@ func (t *Track) initialize(ctx context.Context) error {
 		}
 	}
 
-	err := t.startStream()
+	err := t.startStream(ctx)
 	if err != nil {
 		return errorx.Decorate(err, "get stream")
 	}
@@ -105,7 +96,9 @@ func (t *Track) setStreamURL(ctx context.Context) error {
 	return nil
 }
 
-func (t *Track) startStream() error {
+func (t *Track) startStream(ctx context.Context) error {
+	logger := zerolog.Ctx(ctx)
+
 	ffmpegArgs := []string{
 		"-headers", t.remote.getFormattedHeaders(),
 		"-reconnect", "1",
@@ -133,9 +126,9 @@ func (t *Track) startStream() error {
 		"pipe:1",
 	)
 
-	ffmpeg := exec.Command("ffmpeg", ffmpegArgs...)
+	ffmpeg := exec.CommandContext(ctx, "ffmpeg", ffmpegArgs...)
 
-	t.g.logger.Debug(ffmpeg)
+	logger.Debug().Msg(ffmpeg.String())
 
 	stdout, err := ffmpeg.StdoutPipe()
 	if err != nil {
@@ -162,18 +155,20 @@ func (t *Track) startStream() error {
 	return nil
 }
 
-func (t *Track) clean() {
+func (t *Track) clean(ctx context.Context) {
+	logger := zerolog.Ctx(ctx)
+
 	if t.cmd != nil {
 		err := t.cmd.Process.Kill()
 		if err != nil && !errors.Is(err, os.ErrProcessDone) {
-			t.g.logger.Errorf("Error killing current process: %+v", err)
+			logger.Error().Err(err).Msg("Error killing current process")
 		}
 	}
 
 	if t.stream != nil {
 		err := t.stream.Close()
 		if err != nil && !errors.Is(err, os.ErrClosed) {
-			t.g.logger.Errorf("Error closing current stream: %+v", err)
+			logger.Error().Err(err).Msg("Error closing current stream")
 		}
 	}
 
@@ -182,7 +177,7 @@ func (t *Track) clean() {
 	t.stream = nil
 }
 
-func (t *Track) sendPacketBurst() error {
+func (t *Track) sendPacketBurst(ctx context.Context) error {
 	for i := 0; i < packetBurstNum; i++ {
 		packet := make([]byte, packetSize)
 
@@ -207,8 +202,8 @@ func (t *Track) sendPacketBurst() error {
 		}
 
 		select {
-		case <-t.g.playLoopDone:
-			return ErrShuttingDown
+		case <-ctx.Done():
+			return context.Canceled
 		case t.packetChan <- packet:
 		}
 
@@ -247,19 +242,21 @@ func (t *Track) waitForCMDExit() error {
 func (t *Track) stop(ctx context.Context) error {
 	old := t.remote
 
-	t.clean()
+	t.clean(ctx)
 
 	err := old.DeleteOrRequeue(ctx, t.g.store)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return errorx.Decorate(err, "delete or requeue track")
 	}
 
-	go notifications.SendQueueNotificationLog(ctx, t.g.logger, t.g.store, t.g.botID, t.g.id)
+	go notifications.SendQueueNotificationLog(ctx, t.g.store, t.g.botID, t.g.id)
 
 	return nil
 }
 
 func (t *Track) checkForNextTrack(ctx context.Context) error {
+	logger := zerolog.Ctx(ctx)
+
 	if t.remote != nil {
 		return nil
 	}
@@ -279,46 +276,48 @@ func (t *Track) checkForNextTrack(ctx context.Context) error {
 
 	err = t.g.connect(ctx, "")
 	if err != nil {
-		t.g.logger.Errorf("Error leaving voice channel: %+v", err)
+		logger.Error().Err(err).Msg("Error leaving voice channel")
 	}
 
 	// queue is empty right now
 	// wait for signal on resyncPlaying channel instead of polling database
 	select {
-	case <-t.g.playLoopDone:
-		return ErrShuttingDown
+	case <-ctx.Done():
+		return context.Canceled
 	case <-t.g.resyncPlaying:
-		go notifications.SendQueueNotificationLog(ctx, t.g.logger, t.g.store, t.g.botID, t.g.id)
+		go notifications.SendQueueNotificationLog(ctx, t.g.store, t.g.botID, t.g.id)
 	}
 
 	return ErrNoTrack
 }
 
 func (t *Track) nextTrackPrecondition(ctx context.Context) error {
+	logger := zerolog.Ctx(ctx)
+
 	if t.initialized() {
 		return nil
 	}
 
 	err := t.checkForNextTrack(ctx)
 
-	if errors.Is(err, ErrShuttingDown) || errors.Is(err, ErrNoTrack) {
+	if errors.Is(err, context.Canceled) || errors.Is(err, ErrNoTrack) {
 		return err
 	} else if err != nil {
-		t.g.logger.Errorf("Error checking for next track: %+v", err)
+		logger.Error().Err(err).Msg("Error checking for next track")
 
 		return ErrNoTrack
 	}
 
 	err = t.initialize(ctx)
 	if err != nil {
-		t.g.logger.Errorf("Error initializing track: %+v", err)
+		logger.Error().Err(err).Msg("Error initializing track")
 
 		_, err = t.g.store.NewDelete().Model(t.remote).WherePK().Exec(ctx)
 		if err != nil {
-			t.g.logger.Errorf("Error deleting broken track: %+v", err)
+			logger.Error().Err(err).Msg("Error deleting broken track")
 		}
 
-		t.clean()
+		t.clean(ctx)
 
 		return ErrNoTrack
 	}
@@ -327,13 +326,15 @@ func (t *Track) nextTrackPrecondition(ctx context.Context) error {
 }
 
 func (t *Track) packetPrecondition(ctx context.Context) error {
-	err := t.sendPacketBurst()
+	logger := zerolog.Ctx(ctx)
+
+	err := t.sendPacketBurst(ctx)
 	if err == nil {
 		return nil
 	}
 
-	if errors.Is(err, ErrShuttingDown) {
-		return ErrShuttingDown
+	if errors.Is(err, context.Canceled) {
+		return err
 	}
 
 	if errors.Is(err, io.EOF) {
@@ -352,10 +353,10 @@ func (t *Track) packetPrecondition(ctx context.Context) error {
 		WherePK().
 		Exec(ctx)
 	if rerr != nil {
-		t.g.logger.Errorf("Error resetting stream url: %+v", rerr)
+		logger.Error().Err(rerr).Msg("Error resetting stream url")
 	}
 
-	t.clean()
+	t.clean(ctx)
 
 	return errorx.Decorate(err, "send packet burst")
 }
@@ -377,12 +378,12 @@ func (t *Track) incrementPos() {
 	}
 }
 
-func (t *Track) sendLoop() {
+func (t *Track) sendLoop(ctx context.Context) {
 	var packet []byte
 
 	for {
 		select {
-		case <-t.sendLoopDone:
+		case <-ctx.Done():
 			return
 		case packet = <-t.packetChan:
 		}

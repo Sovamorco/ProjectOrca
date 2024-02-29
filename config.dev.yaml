@@ -1,4 +1,5 @@
 port: 8590
+use_dev_logger: true
 
 spotify: FS->.spotify.yaml
 

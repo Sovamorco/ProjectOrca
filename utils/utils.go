@@ -41,3 +41,13 @@ func MustCreateStatus(c codes.Code, msg string, details ...protoadapt.MessageV1)
 
 	return s
 }
+
+//nolint:ireturn // that signature is required.
+func MarshalErrorxStack(ierr error) any {
+	err := errorx.Cast(ierr)
+	if err == nil {
+		return nil
+	}
+
+	return err.MarshalStackTrace()
+}

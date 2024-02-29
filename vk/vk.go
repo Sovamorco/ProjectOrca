@@ -14,7 +14,7 @@ import (
 	"ProjectOrca/utils"
 
 	"github.com/joomcode/errorx"
-	"go.uber.org/zap"
+	"github.com/rs/zerolog"
 )
 
 const (
@@ -59,15 +59,11 @@ func (a APIError) Error() string {
 }
 
 type VK struct {
-	logger *zap.SugaredLogger
-
 	Token string
 }
 
-func New(_ context.Context, logger *zap.SugaredLogger, token string) (*VK, error) {
+func New(_ context.Context, token string) (*VK, error) {
 	return &VK{
-		logger: logger.Named("vk"),
-
 		Token: token,
 	}, nil
 }
@@ -149,6 +145,8 @@ func (v *VK) extractTrackData(ctx context.Context, matches []string) ([]extracto
 }
 
 func (v *VK) doRequest(ctx context.Context, url string, body map[string]string, dest any) error {
+	logger := zerolog.Ctx(ctx)
+
 	body["access_token"] = v.Token
 	body["v"] = "5.999"
 
@@ -185,7 +183,7 @@ func (v *VK) doRequest(ctx context.Context, url string, body map[string]string, 
 	defer func() {
 		err = res.Body.Close()
 		if err != nil {
-			v.logger.Errorf("Error closing body: %+v", err)
+			logger.Error().Err(err).Msg("Error closing body")
 		}
 	}()
 

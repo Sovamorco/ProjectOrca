@@ -9,15 +9,14 @@ import (
 	"ProjectOrca/models/notifications"
 	pb "ProjectOrca/proto"
 
+	"github.com/joomcode/errorx"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
-func (o *Orca) ShuffleQueue(ctx context.Context, in *pb.GuildOnlyRequest) (*emptypb.Empty, error) {
-	bot, guild, err := o.authenticateWithGuild(ctx, in.GuildID)
+func (o *Orca) ShuffleQueue(ctx context.Context, _ *pb.GuildOnlyRequest) (*emptypb.Empty, error) {
+	bot, guild, err := parseGuildContext(ctx)
 	if err != nil {
-		o.logger.Errorf("Error authenticating request: %+v", err)
-
-		return nil, ErrFailedToAuthenticate
+		return nil, errorx.Decorate(err, "parse authenticated context")
 	}
 
 	_, err = o.store.
@@ -39,12 +38,10 @@ func (o *Orca) ShuffleQueue(ctx context.Context, in *pb.GuildOnlyRequest) (*empt
 			return &emptypb.Empty{}, nil
 		}
 
-		o.logger.Errorf("Error updating ord keys: %+v", err)
-
-		return nil, ErrInternal
+		return nil, errorx.Decorate(err, "shuffle queue")
 	}
 
-	go notifications.SendQueueNotificationLog(context.WithoutCancel(ctx), o.logger, o.store, bot.ID, guild.ID)
+	go notifications.SendQueueNotificationLog(context.WithoutCancel(ctx), o.store, bot.ID, guild.ID)
 
 	return &emptypb.Empty{}, nil
 }

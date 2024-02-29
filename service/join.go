@@ -5,22 +5,15 @@ import (
 
 	pb "ProjectOrca/proto"
 
-	"go.uber.org/zap"
+	"github.com/joomcode/errorx"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 func (o *Orca) Join(ctx context.Context, in *pb.JoinRequest) (*emptypb.Empty, error) {
-	bot, guild, err := o.authenticateWithGuild(ctx, in.GuildID)
+	bot, guild, err := parseGuildContext(ctx)
 	if err != nil {
-		o.logger.Errorf("Error authenticating request: %+v", err)
-
-		return nil, ErrFailedToAuthenticate
+		return nil, errorx.Decorate(err, "parse authenticated context")
 	}
-
-	logger := o.logger.With(
-		zap.String("bot_id", bot.ID),
-		zap.String("guild_id", guild.ID),
-	)
 
 	if guild.ChannelID == in.ChannelID {
 		return &emptypb.Empty{}, nil
@@ -30,27 +23,21 @@ func (o *Orca) Join(ctx context.Context, in *pb.JoinRequest) (*emptypb.Empty, er
 		Set("channel_id = ?", in.ChannelID).
 		Exec(ctx)
 	if err != nil {
-		logger.Errorf("Error updating guild channel id: %+v", err)
-
-		return nil, ErrInternal
+		return nil, errorx.Decorate(err, "update guild channel id to %s", in.ChannelID)
 	}
 
 	err = o.sendResync(ctx, bot.ID, guild.ID, ResyncTargetGuild)
 	if err != nil {
-		logger.Errorf("Error sending resync request: %+v", err)
-
-		return nil, ErrInternal
+		return nil, errorx.Decorate(err, "send resync")
 	}
 
 	return &emptypb.Empty{}, nil
 }
 
-func (o *Orca) Leave(ctx context.Context, in *pb.GuildOnlyRequest) (*emptypb.Empty, error) {
-	bot, guild, err := o.authenticateWithGuild(ctx, in.GuildID)
+func (o *Orca) Leave(ctx context.Context, _ *pb.GuildOnlyRequest) (*emptypb.Empty, error) {
+	bot, guild, err := parseGuildContext(ctx)
 	if err != nil {
-		o.logger.Errorf("Error authenticating request: %+v", err)
-
-		return nil, ErrFailedToAuthenticate
+		return nil, errorx.Decorate(err, "parse authenticated context")
 	}
 
 	if guild.ChannelID == "" {
@@ -62,16 +49,12 @@ func (o *Orca) Leave(ctx context.Context, in *pb.GuildOnlyRequest) (*emptypb.Emp
 		Set("channel_id = NULL").
 		Exec(ctx)
 	if err != nil {
-		o.logger.Errorf("Error updating guild: %+v", err)
-
-		return nil, ErrInternal
+		return nil, errorx.Decorate(err, "update guild channel id to NULL")
 	}
 
 	err = o.sendResync(ctx, bot.ID, guild.ID, ResyncTargetGuild)
 	if err != nil {
-		o.logger.Errorf("Error sending resync request: %+v", err)
-
-		return nil, ErrInternal
+		return nil, errorx.Decorate(err, "send resync")
 	}
 
 	return &emptypb.Empty{}, nil
