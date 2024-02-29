@@ -12,6 +12,7 @@ import (
 	"github.com/joomcode/errorx"
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 )
 
 type ResyncTarget int
@@ -163,7 +164,10 @@ func (o *Orca) handleKeyDel(ctx context.Context, msg *redis.Message) error {
 
 	logger.Info().Msg("Lock expired, trying takeover")
 
-	err := o.initFromStore(ctx)
+	// reset to default logger so we don't pass subscription handler fields to long-running states.
+	initCtx := log.Logger.WithContext(ctx)
+
+	err := o.initFromStore(initCtx)
 	if err != nil {
 		return errorx.Decorate(err, "init after takeover")
 	}
