@@ -39,7 +39,7 @@ type OrcaClient interface {
 	SavePlaylist(ctx context.Context, in *SavePlaylistRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	LoadPlaylist(ctx context.Context, in *LoadPlaylistRequest, opts ...grpc.CallOption) (*PlayReply, error)
 	ListPlaylists(ctx context.Context, in *ListPlaylistsRequest, opts ...grpc.CallOption) (*ListPlaylistsReply, error)
-	Health(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	Health(ctx context.Context, in *HealthRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	Subscribe(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (Orca_SubscribeClient, error)
 }
 
@@ -195,7 +195,7 @@ func (c *orcaClient) ListPlaylists(ctx context.Context, in *ListPlaylistsRequest
 	return out, nil
 }
 
-func (c *orcaClient) Health(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+func (c *orcaClient) Health(ctx context.Context, in *HealthRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	out := new(emptypb.Empty)
 	err := c.cc.Invoke(ctx, "/orca.Orca/Health", in, out, opts...)
 	if err != nil {
@@ -256,7 +256,7 @@ type OrcaServer interface {
 	SavePlaylist(context.Context, *SavePlaylistRequest) (*emptypb.Empty, error)
 	LoadPlaylist(context.Context, *LoadPlaylistRequest) (*PlayReply, error)
 	ListPlaylists(context.Context, *ListPlaylistsRequest) (*ListPlaylistsReply, error)
-	Health(context.Context, *emptypb.Empty) (*emptypb.Empty, error)
+	Health(context.Context, *HealthRequest) (*emptypb.Empty, error)
 	Subscribe(*emptypb.Empty, Orca_SubscribeServer) error
 	mustEmbedUnimplementedOrcaServer()
 }
@@ -313,7 +313,7 @@ func (UnimplementedOrcaServer) LoadPlaylist(context.Context, *LoadPlaylistReques
 func (UnimplementedOrcaServer) ListPlaylists(context.Context, *ListPlaylistsRequest) (*ListPlaylistsReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListPlaylists not implemented")
 }
-func (UnimplementedOrcaServer) Health(context.Context, *emptypb.Empty) (*emptypb.Empty, error) {
+func (UnimplementedOrcaServer) Health(context.Context, *HealthRequest) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Health not implemented")
 }
 func (UnimplementedOrcaServer) Subscribe(*emptypb.Empty, Orca_SubscribeServer) error {
@@ -621,7 +621,7 @@ func _Orca_ListPlaylists_Handler(srv interface{}, ctx context.Context, dec func(
 }
 
 func _Orca_Health_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(emptypb.Empty)
+	in := new(HealthRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -633,7 +633,7 @@ func _Orca_Health_Handler(srv interface{}, ctx context.Context, dec func(interfa
 		FullMethod: "/orca.Orca/Health",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(OrcaServer).Health(ctx, req.(*emptypb.Empty))
+		return srv.(OrcaServer).Health(ctx, req.(*HealthRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }

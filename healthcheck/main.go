@@ -9,7 +9,6 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 func main() {
@@ -27,7 +26,7 @@ func main() {
 
 	cc := orca.NewOrcaClient(conn)
 
-	_, err = cc.Health(context.Background(), &emptypb.Empty{})
+	_, err = cc.Health(context.Background(), &orca.HealthRequest{})
 	if err != nil {
 		panic(err)
 	}

@@ -22,10 +22,12 @@ service Orca {
   rpc SavePlaylist(SavePlaylistRequest) returns (google.protobuf.Empty) {}
   rpc LoadPlaylist(LoadPlaylistRequest) returns (PlayReply) {}
   rpc ListPlaylists(ListPlaylistsRequest) returns (ListPlaylistsReply) {}
-  rpc Health(google.protobuf.Empty) returns (google.protobuf.Empty) {}
+  rpc Health(HealthRequest) returns (google.protobuf.Empty) {}
   rpc Subscribe(google.protobuf.Empty)
       returns (stream QueueChangeNotification) {} // bot-level subscription
 }
+
+message HealthRequest {}
 
 message JoinRequest {
   string guildID = 1;

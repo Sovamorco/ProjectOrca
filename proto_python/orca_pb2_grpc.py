@@ -97,7 +97,7 @@ class OrcaStub(object):
                 )
         self.Health = channel.unary_unary(
                 '/orca.Orca/Health',
-                request_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+                request_serializer=orca__pb2.HealthRequest.SerializeToString,
                 response_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
                 )
         self.Subscribe = channel.unary_stream(
@@ -303,7 +303,7 @@ def add_OrcaServicer_to_server(servicer, server):
             ),
             'Health': grpc.unary_unary_rpc_method_handler(
                     servicer.Health,
-                    request_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+                    request_deserializer=orca__pb2.HealthRequest.FromString,
                     response_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
             ),
             'Subscribe': grpc.unary_stream_rpc_method_handler(
@@ -605,7 +605,7 @@ class Orca(object):
             timeout=None,
             metadata=None):
         return grpc.experimental.unary_unary(request, target, '/orca.Orca/Health',
-            google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+            orca__pb2.HealthRequest.SerializeToString,
             google_dot_protobuf_dot_empty__pb2.Empty.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)

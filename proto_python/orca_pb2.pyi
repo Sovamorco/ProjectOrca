@@ -19,6 +19,10 @@ ErrQueueTooLarge: ErrorCode
 ErrNoExtractor: ErrorCode
 ErrNoResults: ErrorCode
 
+class HealthRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
 class JoinRequest(_message.Message):
     __slots__ = ("guildID", "channelID")
     GUILDID_FIELD_NUMBER: _ClassVar[int]
