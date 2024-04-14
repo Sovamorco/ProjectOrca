@@ -24,9 +24,15 @@ jobs:
 
     - name: Build image
       run: DOCKER_BUILDKIT=1 docker build -t ${{ env.image }} .
+      env:
+        # work around https://github.com/github/vscode-github-actions/issues/222. it's annoying.
+        image: ${{ env.image }}
 
     - name: Update service
       run: docker service update orca --image ${{ env.image }} --update-failure-action rollback --rollback-failure-action continue | tee /tmp/capture.out
+      env:
+        # work around https://github.com/github/vscode-github-actions/issues/222. it's annoying.
+        image: ${{ env.image }}
 
     - name: Exit if rollback happened
       run: if [ "$(cat /tmp/capture.out | grep -c '^rollback:')" -ge 1 ]; then echo 'Rollback occurred'; exit 1; fi
