@@ -197,6 +197,8 @@ func (g *Guild) playLoop(ctx context.Context) {
 }
 
 // playLoopPreconditions checks for all the preconditions for playing the track.
+//
+//nolint:cyclop // this function is really not that complicated.
 func (g *Guild) playLoopPreconditions(ctx context.Context, track *Track) error {
 	// if we need to resync playing - reset current playing track
 	select {

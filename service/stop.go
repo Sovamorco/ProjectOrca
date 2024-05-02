@@ -28,6 +28,13 @@ func (o *Orca) Stop(ctx context.Context, _ *pb.GuildOnlyRequest) (*emptypb.Empty
 		return nil, errorx.Decorate(err, "delete all tracks")
 	}
 
+	// set pause to false because of expectation that bot starts playing next time a track is requested
+	// because stop usually means end of listening session.
+	err = o.updatePauseState(ctx, bot, guild, false)
+	if err != nil {
+		return nil, errorx.Decorate(err, "update pause state")
+	}
+
 	err = o.sendResync(ctx, bot.ID, guild.ID, ResyncTargetCurrent)
 	if err != nil {
 		return nil, errorx.Decorate(err, "send resync")
