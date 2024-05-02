@@ -226,11 +226,13 @@ func (g *Guild) playLoopPreconditions(ctx context.Context, track *Track) error {
 		return errorx.Decorate(err, "packet precondition")
 	}
 
-	// try to consume playing from itself to verify that the track is, indeed, playing
 	select {
 	case <-ctx.Done():
 		return context.Canceled
+	// try to consume playing from itself to verify that the track is, indeed, playing.
 	case g.playing <- <-g.playing:
+	// alternatively try to consume resyncPlaying from itself to not hang if resync was sent in paused state.
+	case g.resyncPlaying <- <-g.resyncPlaying:
 	}
 
 	return nil
