@@ -122,6 +122,7 @@ enum ErrorCode {
   ErrQueueTooLarge = 1;
   ErrNoExtractor = 2;
   ErrNoResults = 3;
+  ErrCaptcha = 4;
 }
 
 message ErrorCodeWrapper {

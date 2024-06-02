@@ -49,6 +49,10 @@ func NewRemoteTracks(
 		return nil, errorx.Decorate(err, "get tracks data")
 	}
 
+	if len(data) == 0 {
+		return nil, extractor.ErrNoResults
+	}
+
 	res := make([]*RemoteTrack, len(data))
 
 	for i, datum := range data {

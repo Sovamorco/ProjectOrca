@@ -78,7 +78,7 @@ func (s *Spotify) QueryMatches(_ context.Context, q string) bool {
 
 func (s *Spotify) ExtractTracksData(ctx context.Context, url string) ([]extractor.TrackData, error) {
 	matches := utils.SpotifyRx.FindStringSubmatch(url)
-	if len(matches) < 3 { //nolint:gomnd // see regex
+	if len(matches) < 3 { //nolint:mnd // see regex
 		return nil, ErrInvalidSpotifyURL
 	}
 

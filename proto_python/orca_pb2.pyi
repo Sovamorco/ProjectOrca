@@ -14,10 +14,12 @@ class ErrorCode(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     ErrQueueTooLarge: _ClassVar[ErrorCode]
     ErrNoExtractor: _ClassVar[ErrorCode]
     ErrNoResults: _ClassVar[ErrorCode]
+    ErrCaptcha: _ClassVar[ErrorCode]
 ErrNone: ErrorCode
 ErrQueueTooLarge: ErrorCode
 ErrNoExtractor: ErrorCode
 ErrNoResults: ErrorCode
+ErrCaptcha: ErrorCode
 
 class HealthRequest(_message.Message):
     __slots__ = ()

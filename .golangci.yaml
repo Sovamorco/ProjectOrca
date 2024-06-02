@@ -1,20 +1,12 @@
 linters:
   enable-all: true
   disable:
-  - interfacer
-  - varcheck
-  - structcheck
-  - deadcode
-  - maligned
-  - exhaustivestruct
-  - ifshort
-  - nosnakecase
-  - golint
-  - scopelint
   - tagliatelle
   - varnamelen
   - depguard
   - godox
+  - gomnd
+  - execinquery
   - protogetter # I do not agree with it
   - goimports # conflicts with gofumpt
   - gci       # conflicts with gofumpt

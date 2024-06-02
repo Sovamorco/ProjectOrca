@@ -124,7 +124,7 @@ func (o *Orca) chooseOrdKeyRange(
 		Column("ord_key").
 		Order("ord_key").
 		Offset(max(position-1, 0)). // have a separate check for position 0 later
-		Limit(2).                   //nolint:gomnd // previous and next track in theory
+		Limit(2).                   //nolint:mnd // previous and next track in theory
 		Rows(ctx)
 	if err != nil {
 		logger.Error().Err(err).Msg("Error getting ordkeys from store")

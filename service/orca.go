@@ -9,6 +9,7 @@ import (
 
 	"ProjectOrca/config"
 	"ProjectOrca/spotify"
+	"ProjectOrca/yandexmusic"
 	"ProjectOrca/ytdl"
 
 	"github.com/go-redsync/redsync/v4"
@@ -86,6 +87,7 @@ func (o *Orca) initExtractors(ctx context.Context) error {
 		o.extractors.AddExtractor(v)
 	}
 
+	o.extractors.AddExtractor(yandexmusic.New())
 	o.extractors.AddExtractor(ytdl.New())
 
 	return nil

@@ -73,11 +73,11 @@ func (v *VK) QueryMatches(_ context.Context, q string) bool {
 }
 
 func (v *VK) ExtractTracksData(ctx context.Context, q string) ([]extractor.TrackData, error) {
-	if matches := utils.VKAlbumRX.FindStringSubmatch(q); len(matches) >= 3 { //nolint:gomnd // no comment
+	if matches := utils.VKAlbumRX.FindStringSubmatch(q); len(matches) >= 3 { //nolint:mnd // no comment
 		return v.extractAlbumTracksData(ctx, matches)
-	} else if matches = utils.VKPersRX.FindStringSubmatch(q); len(matches) >= 2 { //nolint:gomnd // no comment
+	} else if matches = utils.VKPersRX.FindStringSubmatch(q); len(matches) >= 2 { //nolint:mnd // no comment
 		return v.extractPersonalTracksData(ctx, matches)
-	} else if matches = utils.VKTrackRx.FindStringSubmatch(q); len(matches) >= 3 { //nolint:gomnd // no comment
+	} else if matches = utils.VKTrackRx.FindStringSubmatch(q); len(matches) >= 3 { //nolint:mnd // no comment
 		return v.extractTrackData(ctx, matches)
 	}
 
@@ -90,7 +90,7 @@ func (v *VK) extractAlbumTracksData(ctx context.Context, matches []string) ([]ex
 		"playlist_id": matches[2],
 	}
 
-	if len(matches) >= 4 { //nolint:gomnd // no comment
+	if len(matches) >= 4 { //nolint:mnd // no comment
 		body["access_key"] = matches[3]
 	}
 
@@ -128,7 +128,7 @@ func (v *VK) extractTrackData(ctx context.Context, matches []string) ([]extracto
 		"audios": fmt.Sprintf("%s_%s", matches[1], matches[2]),
 	}
 
-	if len(matches) >= 4 { //nolint:gomnd // no comment
+	if len(matches) >= 4 { //nolint:mnd // no comment
 		body["audios"] += "_" + matches[3]
 	}
 

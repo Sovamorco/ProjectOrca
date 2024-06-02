@@ -99,7 +99,7 @@ func (y *YTDL) ExtractStreamURL(ctx context.Context, extURL string) (string, tim
 	}
 
 	spl := strings.Split(string(urlB), "\n")
-	if len(spl) < 2 { //nolint:gomnd // 2 lines used later
+	if len(spl) < 2 { //nolint:mnd // 2 lines used later
 		return "", 0, ErrInvalidOutput
 	}
 

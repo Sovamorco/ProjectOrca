@@ -2,8 +2,9 @@ package main
 
 import (
 	"context"
-	"log/slog"
 	"os"
+
+	"github.com/rs/zerolog/log"
 
 	orca "ProjectOrca/proto"
 
@@ -20,7 +21,7 @@ func main() {
 	defer func() {
 		err = conn.Close()
 		if err != nil {
-			slog.Error("Error closing connection: ", err)
+			log.Error().Err(err).Msg("Error closing connection")
 		}
 	}()
 

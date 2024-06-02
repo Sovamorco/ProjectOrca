@@ -15,8 +15,13 @@ var (
 	ErrNoExtractor = utils.MustCreateStatus(codes.InvalidArgument, "no extractor for given url", &pb.ErrorCodeWrapper{
 		Code: pb.ErrorCode_ErrNoExtractor,
 	}).Err()
+
 	ErrNoResults = utils.MustCreateStatus(codes.InvalidArgument, "no results for given url", &pb.ErrorCodeWrapper{
 		Code: pb.ErrorCode_ErrNoResults,
+	}).Err()
+
+	ErrCaptcha = utils.MustCreateStatus(codes.InvalidArgument, "captcha detected", &pb.ErrorCodeWrapper{
+		Code: pb.ErrorCode_ErrCaptcha,
 	}).Err()
 )
 

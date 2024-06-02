@@ -10,10 +10,22 @@ import (
 )
 
 var (
-	URLRx     = regexp.MustCompile(`https?://(?:www\.)?`)
+	URLRx = regexp.MustCompile(`https?://(?:www\.)?`)
+
 	SpotifyRx = regexp.MustCompile(
 		`(?:spotify:|(?:https?://)?(?:www\.)?open\.spotify\.com/)(playlist|track|album)[:/]([a-zA-Z0-9]+)`,
 	)
+
+	YandexMusicTrackRx = regexp.MustCompile(
+		`https?://(?:www\.)?music\.yandex\.(?:[^/]+)(?:/album/(?:[0-9]+))?/track/([0-9]+)`,
+	)
+	YandexMusicAlbumRx = regexp.MustCompile(
+		`https?://(?:www\.)?music\.yandex\.(?:[^/]+)/album/([0-9]+)`,
+	)
+	YandexMusicPlaylistRx = regexp.MustCompile(
+		`https?://(?:www\.)?music\.yandex\.(?:[^/]+)/users/([^/]+)/playlists/([0-9]+)`,
+	)
+
 	VKAlbumRX = regexp.MustCompile(
 		`https?://(?:www\.)?vk\.com/.*?(?:audio_playlist|album/|playlist/)(-?[0-9]+)_([0-9]+)(?:(?:%2f|%2F|/|_)([a-z0-9]+))?`,
 	)
