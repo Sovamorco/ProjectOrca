@@ -5,7 +5,7 @@ spotify: VAULT->/secret/orca/spotify
 
 vk: VAULT->/secret/orca/vk
 
-yandex_music: VAULT->/secret/yandex_music
+yandex_music: VAULT->/secret/orca/yandex_music
 
 db: VAULT->/secret/orca/db_connection_profile
 
