@@ -340,5 +340,5 @@ func getTrackDisplayURL(track spotify.SimpleTrack) string {
 }
 
 func getExtractionURL(title string) string {
-	return "https://www.youtube.com/results?search_query=" + title
+	return "https://www.youtube.com/results?search_query=" + title + " lyrics"
 }
