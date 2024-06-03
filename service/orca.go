@@ -87,16 +87,15 @@ func (o *Orca) initExtractors(ctx context.Context) error {
 		o.extractors.AddExtractor(v)
 	}
 
+	ytex := ytdl.New()
+
 	if o.config.YandexMusic != nil {
-		ym, err := yandexmusic.New(o.config.YandexMusic.Cookies)
-		if err != nil {
-			return errorx.Decorate(err, "init yandexmusic module")
-		}
+		ym := yandexmusic.New(ytex, o.config.YandexMusic.Token)
 
 		o.extractors.AddExtractor(ym)
 	}
 
-	o.extractors.AddExtractor(ytdl.New())
+	o.extractors.AddExtractor(ytex)
 
 	return nil
 }

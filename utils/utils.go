@@ -17,7 +17,7 @@ var (
 	)
 
 	YandexMusicTrackRx = regexp.MustCompile(
-		`https?://(?:www\.)?music\.yandex\.(?:[^/]+)(?:/album/(?:[0-9]+))?/track/([0-9]+)`,
+		`https?://(?:www\.)?music\.yandex\.(?:[^/]+)/album/(?:[0-9]+)/track/(?:[0-9]+)`,
 	)
 	YandexMusicAlbumRx = regexp.MustCompile(
 		`https?://(?:www\.)?music\.yandex\.(?:[^/]+)/album/([0-9]+)`,

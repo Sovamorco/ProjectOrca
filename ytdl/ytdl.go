@@ -49,11 +49,17 @@ func (y *YTDL) QueryMatches(context.Context, string) bool {
 }
 
 func (y *YTDL) ExtractTracksData(ctx context.Context, query string) ([]extractor.TrackData, error) {
+	return y.ExtractTracksDataHeaders(ctx, query, nil)
+}
+
+func (y *YTDL) ExtractTracksDataHeaders(
+	ctx context.Context, query string, headers map[string]string,
+) ([]extractor.TrackData, error) {
 	if !utils.URLRx.MatchString(query) {
 		query = "ytsearch1:" + query
 	}
 
-	ytd, err := y.getTracksData(ctx, query)
+	ytd, err := y.getTracksData(ctx, query, headers)
 	if err != nil {
 		return nil, errorx.Decorate(err, "get ytdl tracks data")
 	}
@@ -93,7 +99,21 @@ func (y *YTDL) ExtractionURLMatches(_ context.Context, extURL string) bool {
 }
 
 func (y *YTDL) ExtractStreamURL(ctx context.Context, extURL string) (string, time.Duration, error) {
-	urlB, err := y.getYTDLPOutput(ctx, "-I", "1:1", "-O", "url,duration", extURL)
+	return y.ExtractStreamURLHeaders(ctx, extURL, nil)
+}
+
+func (y *YTDL) ExtractStreamURLHeaders(
+	ctx context.Context, extURL string, headers map[string]string,
+) (string, time.Duration, error) {
+	//nolint:mnd // flag and value for flag.
+	args := make([]string, 0, len(headers)*2)
+	for k, v := range headers {
+		args = append(args, "--add-headers", k+":"+v)
+	}
+
+	args = append(args, "-I", "1:1", "-O", "url,duration", extURL)
+
+	urlB, err := y.getYTDLPOutput(ctx, args...)
 	if err != nil {
 		return "", 0, errorx.Decorate(err, "get stream url")
 	}
@@ -114,8 +134,16 @@ func (y *YTDL) ExtractStreamURL(ctx context.Context, extURL string) (string, tim
 	return url, duration, nil
 }
 
-func (y *YTDL) getTracksData(ctx context.Context, query string) ([]TrackData, error) {
-	jsonB, err := y.getYTDLPOutput(ctx, "--flat-playlist", "-J", query)
+func (y *YTDL) getTracksData(ctx context.Context, query string, headers map[string]string) ([]TrackData, error) {
+	//nolint:mnd // flag and value for flag.
+	args := make([]string, 0, len(headers)*2)
+	for k, v := range headers {
+		args = append(args, "--add-headers", k+":"+v)
+	}
+
+	args = append(args, "--flat-playlist", "-J", query)
+
+	jsonB, err := y.getYTDLPOutput(ctx, args...)
 	if err != nil {
 		return nil, errorx.Decorate(err, "get ytdlp output")
 	}

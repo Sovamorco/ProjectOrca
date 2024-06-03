@@ -25,7 +25,7 @@ type VK struct {
 }
 
 type YandexMusic struct {
-	Cookies string `mapstructure:"cookies"`
+	Token string `mapstructure:"token"`
 }
 
 type Config struct {

@@ -1,22 +1,18 @@
 package yandexmusic
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
-	"net/http/cookiejar"
 	"net/url"
-	"strings"
 	"time"
 
 	"ProjectOrca/extractor"
 	"ProjectOrca/utils"
-
-	"golang.org/x/net/publicsuffix"
+	"ProjectOrca/ytdl"
 
 	"github.com/joomcode/errorx"
 	"github.com/rs/zerolog"
@@ -25,6 +21,7 @@ import (
 var (
 	ErrInvalidYMURL           = errors.New("invalid yandex music url")
 	ErrCannotExtractStreamURL = errors.New("cannot use yandex music extractor to extract stream url")
+	ErrNoAlbum                = errorx.IllegalState.New("missing album in track results")
 )
 
 type Track struct {
@@ -33,8 +30,12 @@ type Track struct {
 	DurationMS int    `json:"durationMs"`
 
 	Artists []struct {
-		Name string
+		Name string `json:"name"`
 	} `json:"artists"`
+
+	Albums []struct {
+		ID int `json:"id"`
+	} `json:"albums"`
 }
 
 func (t Track) getTitle() string {
@@ -46,22 +47,25 @@ func (t Track) getTitle() string {
 	return artist + t.Title
 }
 
-func (t Track) toTrackData() extractor.TrackData {
+func (t Track) toTrackData() (extractor.TrackData, error) {
+	var res extractor.TrackData
+
+	if len(t.Albums) == 0 {
+		return res, ErrNoAlbum
+	}
+
+	albumID := t.Albums[0].ID
 	title := t.getTitle()
 
 	return extractor.TrackData{
 		Title:         title,
-		ExtractionURL: getExtractionURL(title),
-		DisplayURL:    getDisplayURL(t.ID),
+		ExtractionURL: getDisplayURL(albumID, t.ID),
+		DisplayURL:    getDisplayURL(albumID, t.ID),
 		StreamURL:     "",
 		Live:          false,
 		Duration:      time.Duration(t.DurationMS) * time.Millisecond,
 		HTTPHeaders:   nil,
-	}
-}
-
-type YMResponse struct {
-	Type string `json:"type"`
+	}, nil
 }
 
 type SingleTrackData struct {
@@ -73,239 +77,187 @@ type AlbumData struct {
 }
 
 type PlaylistData struct {
-	Playlist struct {
-		Tracks []Track `json:"tracks"`
-	} `json:"playlist"`
+	Tracks []SingleTrackData `json:"tracks"`
+}
+
+type Response[T any] struct {
+	Result T `json:"result"`
 }
 
 type YandexMusic struct {
 	baseURL url.URL
 	client  *http.Client
+	token   string
+
+	ytdl *ytdl.YTDL
 }
 
-func New(cookiesS string) (*YandexMusic, error) {
+func New(ytdl *ytdl.YTDL, token string) *YandexMusic {
 	var client http.Client
 
 	//nolint:exhaustruct
 	baseURL := url.URL{
 		Scheme: "https",
-		Host:   "music.yandex.ru",
+		Host:   "api.music.yandex.net",
 	}
-
-	jar, err := cookiejar.New(&cookiejar.Options{PublicSuffixList: publicsuffix.List})
-	if err != nil {
-		return nil, errorx.Decorate(err, "create cookie jar")
-	}
-
-	cookies := make([]*http.Cookie, 0)
-
-	scanner := bufio.NewScanner(bytes.NewBufferString(cookiesS))
-
-	for scanner.Scan() {
-		//nolint:mnd // key and value
-		cookieSplit := strings.SplitN(scanner.Text(), "\t", 2)
-		//nolint:mnd // key and value
-		if len(cookieSplit) < 2 {
-			continue
-		}
-
-		//nolint:exhaustruct
-		cookie := &http.Cookie{
-			Name:  cookieSplit[0],
-			Value: strings.Trim(cookieSplit[1], "\""),
-		}
-
-		cookies = append(cookies, cookie)
-	}
-
-	jar.SetCookies(&baseURL, cookies)
-
-	client.Jar = jar
 
 	return &YandexMusic{
 		baseURL: baseURL,
 		client:  &client,
-	}, nil
+		token:   token,
+
+		ytdl: ytdl,
+	}
 }
 
-func (s *YandexMusic) QueryMatches(_ context.Context, q string) bool {
+func (y *YandexMusic) QueryMatches(_ context.Context, q string) bool {
 	return utils.YandexMusicTrackRx.MatchString(q) ||
 		utils.YandexMusicAlbumRx.MatchString(q) ||
 		utils.YandexMusicPlaylistRx.MatchString(q)
 }
 
-func (s *YandexMusic) ExtractTracksData(ctx context.Context, url string) ([]extractor.TrackData, error) {
-	if matches := utils.YandexMusicTrackRx.FindStringSubmatch(url); len(matches) >= 2 { //nolint:mnd // see regex
-		return s.getTrackData(ctx, url, matches[1])
-	} else if matches := utils.YandexMusicAlbumRx.FindStringSubmatch(url); len(matches) >= 2 { //nolint:mnd // see regex
-		return s.getAlbumTracksData(ctx, url, matches[1])
-	} else if matches := utils.YandexMusicPlaylistRx.FindStringSubmatch(url); len(matches) >= 3 { //nolint:mnd // see regex
-		return s.getPlaylistTracksData(ctx, url, matches[1], matches[2])
+func (y *YandexMusic) ExtractTracksData(ctx context.Context, url string) ([]extractor.TrackData, error) {
+	var res []extractor.TrackData
+
+	var err error
+
+	if utils.YandexMusicTrackRx.MatchString(url) {
+		res, err = y.ytdl.ExtractTracksDataHeaders(ctx, url, y.authHeader())
+	} else if matches := utils.YandexMusicAlbumRx.FindStringSubmatch(url); len(matches) >= 2 { //nolint:mnd // see regex.
+		res, err = y.getAlbumTracksData(ctx, matches[1])
+	} else if matches := utils.YandexMusicPlaylistRx.FindStringSubmatch(url); len(matches) >= 3 { //nolint:mnd
+		res, err = y.getPlaylistTracksData(ctx, matches[1], matches[2])
+	} else {
+		err = ErrInvalidYMURL
 	}
 
-	return nil, ErrInvalidYMURL
-}
-
-func (s *YandexMusic) ExtractionURLMatches(_ context.Context, _ string) bool {
-	// cannot use spotify for stream url extraction
-	return false
-}
-
-func (s *YandexMusic) ExtractStreamURL(_ context.Context, _ string) (string, time.Duration, error) {
-	return "", 0, ErrCannotExtractStreamURL
-}
-
-func (s *YandexMusic) getTrackData(ctx context.Context, url, id string) ([]extractor.TrackData, error) {
-	track, err := doRequest[SingleTrackData](ctx, s.client, s.baseURL,
-		"track",
-		map[string]string{
-			"track": id,
-		}, url)
 	if err != nil {
-		return nil, errorx.Decorate(err, "do yandex music request")
+		return nil, errorx.Decorate(err, "extract tracks")
 	}
 
-	return []extractor.TrackData{track.Track.toTrackData()}, nil
+	return res, nil
 }
 
-func (s *YandexMusic) getAlbumTracksData(ctx context.Context, url, id string) ([]extractor.TrackData, error) {
-	data, err := doRequest[AlbumData](ctx, s.client, s.baseURL,
-		"album",
-		map[string]string{
-			"album": id,
-		}, url)
+func (y *YandexMusic) ExtractionURLMatches(_ context.Context, q string) bool {
+	return utils.YandexMusicTrackRx.MatchString(q)
+}
+
+func (y *YandexMusic) ExtractStreamURL(ctx context.Context, url string) (string, time.Duration, error) {
+	stream, dur, err := y.ytdl.ExtractStreamURLHeaders(ctx, url, y.authHeader())
 	if err != nil {
-		return nil, errorx.Decorate(err, "do yandex music request")
+		return "", 0, errorx.Decorate(err, "extract stream url with ytdl")
 	}
 
-	tracksNum := 0
-	for _, volume := range data.Volumes {
-		tracksNum += len(volume)
+	return stream, dur, nil
+}
+
+func (y *YandexMusic) getAlbumTracksData(ctx context.Context, albumID string) ([]extractor.TrackData, error) {
+	url := y.baseURL
+
+	url.Path = "/albums/" + albumID + "/with-tracks"
+
+	var data Response[AlbumData]
+
+	err := y.doRequest(ctx, url, &data)
+	if err != nil {
+		return nil, errorx.Decorate(err, "do request")
 	}
 
-	tracksData := make([]extractor.TrackData, 0, tracksNum)
+	res := make([]extractor.TrackData, 0)
 
-	for _, volume := range data.Volumes {
+	for _, volume := range data.Result.Volumes {
 		for _, track := range volume {
-			tracksData = append(tracksData, track.toTrackData())
+			trackData, err := track.toTrackData()
+			if err != nil {
+				if errors.Is(err, ErrNoAlbum) {
+					continue
+				}
+
+				return nil, errorx.Decorate(err, "convert track to data")
+			}
+
+			res = append(res, trackData)
 		}
 	}
 
-	return tracksData, nil
+	return res, nil
 }
 
-func (s *YandexMusic) getPlaylistTracksData(ctx context.Context, url, owner, id string) ([]extractor.TrackData, error) {
-	data, err := doRequest[PlaylistData](ctx,
-		s.client, s.baseURL, "playlist",
-		map[string]string{
-			"owner": owner,
-			"kinds": id,
-		}, url)
+func (y *YandexMusic) getPlaylistTracksData(
+	ctx context.Context, owner, playlistID string,
+) ([]extractor.TrackData, error) {
+	url := y.baseURL
+
+	url.Path = "/users/" + owner + "/playlists/" + playlistID
+
+	var data Response[PlaylistData]
+
+	err := y.doRequest(ctx, url, &data)
 	if err != nil {
-		return nil, errorx.Decorate(err, "do yandex music request")
+		return nil, errorx.Decorate(err, "do request")
 	}
 
-	tracksData := make([]extractor.TrackData, 0, len(data.Playlist.Tracks))
+	res := make([]extractor.TrackData, 0)
 
-	for _, track := range data.Playlist.Tracks {
-		tracksData = append(tracksData, track.toTrackData())
+	for _, track := range data.Result.Tracks {
+		trackData, err := track.Track.toTrackData()
+		if err != nil {
+			if errors.Is(err, ErrNoAlbum) {
+				continue
+			}
+
+			return nil, errorx.Decorate(err, "convert track to data")
+		}
+
+		res = append(res, trackData)
 	}
 
-	return tracksData, nil
+	return res, nil
 }
 
-func doRequest[T any](
-	ctx context.Context,
-	client *http.Client, baseURL url.URL,
-	handler string, params map[string]string, referrer string,
-) (T, error) {
+func (y *YandexMusic) doRequest(ctx context.Context, url url.URL, dest any) error {
 	logger := zerolog.Ctx(ctx)
 
-	var data T
-
-	req, err := createRequest(ctx, baseURL, handler, params, referrer)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url.String(), http.NoBody)
 	if err != nil {
-		return data, errorx.Decorate(err, "create request")
+		return errorx.Decorate(err, "create request")
 	}
 
-	res, err := client.Do(req)
+	req.Header.Add("Authorization", "OAuth "+y.token)
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return data, errorx.Decorate(err, "send request")
+		return errorx.Decorate(err, "send request")
 	}
 
 	defer func() {
-		err := res.Body.Close()
+		err := resp.Body.Close()
 		if err != nil {
 			logger.Error().Err(err).Msg("Error closing body")
 		}
 	}()
 
-	body, err := io.ReadAll(res.Body)
+	b, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return data, errorx.Decorate(err, "read body")
+		return errorx.Decorate(err, "read body")
 	}
 
-	var ymresponse YMResponse
+	logger.Debug().Str("body", string(b)).Send()
 
-	err = json.Unmarshal(body, &ymresponse)
+	err = json.Unmarshal(b, dest)
 	if err != nil {
-		return data, errorx.Decorate(err, "unmarshal response")
+		return errorx.Decorate(err, "decode response")
 	}
 
-	if ymresponse.Type == "captcha" {
-		return data, extractor.ErrCaptcha
-	}
-
-	err = json.Unmarshal(body, &data)
-	if err != nil {
-		return data, errorx.Decorate(err, "decode response")
-	}
-
-	return data, nil
+	return nil
 }
 
-func createRequest(
-	ctx context.Context, baseURL url.URL, handler string, params map[string]string, referrer string,
-) (*http.Request, error) {
-	logger := zerolog.Ctx(ctx)
-
-	baseURL.Path = "/handlers/" + handler + ".jsx"
-
-	query := baseURL.Query()
-
-	query.Add("light", "true")
-	query.Add("lang", "ru")
-	query.Add("external-domain", "music.yandex.ru")
-	query.Add("overembed", "false")
-
-	for k, v := range params {
-		query.Add(k, v)
-	}
-
-	baseURL.RawQuery = query.Encode()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL.String(), http.NoBody)
-	if err != nil {
-		return nil, errorx.Decorate(err, "create request")
-	}
-
-	req.Header.Add("Referer", referrer)
-	req.Header.Add("X-Requested-With", "XMLHttpRequest")
-	req.Header.Add("X-Retpath-Y", referrer)
-	req.Header.Add("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:127.0) Gecko/20100101 Firefox/127.0")
-
-	logger.Debug().
-		Str("url", baseURL.String()).
-		Any("headers", req.Header).
-		Msg("Requesting")
-
-	return req, nil
+func getDisplayURL(albumID int, trackID string) string {
+	return fmt.Sprintf("https://music.yandex.ru/album/%d/track/%s", albumID, trackID)
 }
 
-func getExtractionURL(title string) string {
-	return "https://www.youtube.com/results?search_query=" + title + " lyrics"
-}
-
-func getDisplayURL(id string) string {
-	return "https://music.yandex.ru/track/" + id
+func (y *YandexMusic) authHeader() map[string]string {
+	return map[string]string{
+		"Authorization": "OAuth " + y.token,
+	}
 }
