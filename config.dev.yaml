@@ -5,6 +5,8 @@ spotify: FS->.spotify.yaml
 
 vk: FS->.vk.yaml
 
+yandex_music: FS->.yandex_music.yaml
+
 db:
   host: 127.0.0.1
   port: 5432

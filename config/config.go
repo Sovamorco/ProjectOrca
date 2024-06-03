@@ -24,14 +24,19 @@ type VK struct {
 	Token string `mapstructure:"token"`
 }
 
+type YandexMusic struct {
+	Cookies string `mapstructure:"cookies"`
+}
+
 type Config struct {
 	Port         int  `mapstructure:"port"`
 	UseDevLogger bool `mapstructure:"use_dev_logger"`
 
-	Spotify *Spotify          `mapstructure:"spotify"`
-	VK      *VK               `mapstructure:"vk"`
-	DB      store.DBConfig    `mapstructure:"db"`
-	Redis   store.RedisConfig `mapstructure:"redis"`
+	Spotify     *Spotify          `mapstructure:"spotify"`
+	VK          *VK               `mapstructure:"vk"`
+	YandexMusic *YandexMusic      `mapstructure:"yandex_music"`
+	DB          store.DBConfig    `mapstructure:"db"`
+	Redis       store.RedisConfig `mapstructure:"redis"`
 }
 
 func LoadConfig(ctx context.Context) (*Config, error) {

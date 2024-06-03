@@ -1,16 +1,22 @@
 package yandexmusic
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
+	"strings"
 	"time"
 
 	"ProjectOrca/extractor"
 	"ProjectOrca/utils"
+
+	"golang.org/x/net/publicsuffix"
 
 	"github.com/joomcode/errorx"
 	"github.com/rs/zerolog"
@@ -77,7 +83,7 @@ type YandexMusic struct {
 	client  *http.Client
 }
 
-func New() *YandexMusic {
+func New(cookiesS string) (*YandexMusic, error) {
 	var client http.Client
 
 	//nolint:exhaustruct
@@ -86,10 +92,40 @@ func New() *YandexMusic {
 		Host:   "music.yandex.ru",
 	}
 
+	jar, err := cookiejar.New(&cookiejar.Options{PublicSuffixList: publicsuffix.List})
+	if err != nil {
+		return nil, errorx.Decorate(err, "create cookie jar")
+	}
+
+	cookies := make([]*http.Cookie, 0)
+
+	scanner := bufio.NewScanner(bytes.NewBufferString(cookiesS))
+
+	for scanner.Scan() {
+		//nolint:mnd // key and value
+		cookieSplit := strings.SplitN(scanner.Text(), "\t", 2)
+		//nolint:mnd // key and value
+		if len(cookieSplit) < 2 {
+			continue
+		}
+
+		//nolint:exhaustruct
+		cookie := &http.Cookie{
+			Name:  cookieSplit[0],
+			Value: strings.Trim(cookieSplit[1], "\""),
+		}
+
+		cookies = append(cookies, cookie)
+	}
+
+	jar.SetCookies(&baseURL, cookies)
+
+	client.Jar = jar
+
 	return &YandexMusic{
 		baseURL: baseURL,
 		client:  &client,
-	}
+	}, nil
 }
 
 func (s *YandexMusic) QueryMatches(_ context.Context, q string) bool {
@@ -231,6 +267,8 @@ func doRequest[T any](
 func createRequest(
 	ctx context.Context, baseURL url.URL, handler string, params map[string]string, referrer string,
 ) (*http.Request, error) {
+	logger := zerolog.Ctx(ctx)
+
 	baseURL.Path = "/handlers/" + handler + ".jsx"
 
 	query := baseURL.Query()
@@ -254,6 +292,12 @@ func createRequest(
 	req.Header.Add("Referer", referrer)
 	req.Header.Add("X-Requested-With", "XMLHttpRequest")
 	req.Header.Add("X-Retpath-Y", referrer)
+	req.Header.Add("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:127.0) Gecko/20100101 Firefox/127.0")
+
+	logger.Debug().
+		Str("url", baseURL.String()).
+		Any("headers", req.Header).
+		Msg("Requesting")
 
 	return req, nil
 }

@@ -80,14 +80,14 @@ func main() {
 		cfg, err = config.LoadConfigVault(ctx, vc)
 	}
 
+	if err != nil {
+		logger.Fatal().Err(err).Msg("Error loading config")
+	}
+
 	if cfg.UseDevLogger {
 		//nolint:exhaustruct
 		logger = logger.Level(zerolog.TraceLevel).Output(zerolog.ConsoleWriter{Out: os.Stderr})
 		log.Logger = logger
-	}
-
-	if err != nil {
-		logger.Fatal().Err(err).Msg("Error loading config")
 	}
 
 	ctx = logger.WithContext(ctx)
