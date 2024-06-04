@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"ProjectOrca/extractor"
@@ -40,8 +41,14 @@ type Track struct {
 
 func (t Track) getTitle() string {
 	artist := ""
+
 	if len(t.Artists) > 0 {
-		artist = t.Artists[0].Name + " - "
+		artistsNames := make([]string, len(t.Artists))
+		for i, artist := range t.Artists {
+			artistsNames[i] = artist.Name
+		}
+
+		artist = strings.Join(artistsNames, ", ") + " - "
 	}
 
 	return artist + t.Title
