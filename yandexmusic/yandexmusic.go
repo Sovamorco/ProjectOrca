@@ -40,7 +40,7 @@ type Track struct {
 }
 
 func (t Track) getTitle() string {
-	artist := ""
+	artists := ""
 
 	if len(t.Artists) > 0 {
 		artistsNames := make([]string, len(t.Artists))
@@ -48,10 +48,10 @@ func (t Track) getTitle() string {
 			artistsNames[i] = artist.Name
 		}
 
-		artist = strings.Join(artistsNames, ", ") + " - "
+		artists = strings.Join(artistsNames, ", ") + " - "
 	}
 
-	return artist + t.Title
+	return artists + t.Title
 }
 
 func (t Track) toTrackData() (extractor.TrackData, error) {

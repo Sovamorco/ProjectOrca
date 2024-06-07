@@ -17,13 +17,13 @@ var (
 	)
 
 	YandexMusicTrackRx = regexp.MustCompile(
-		`https?://(?:www\.)?music\.yandex\.(?:[^/]+)/album/(?:[0-9]+)/track/(?:[0-9]+)`,
+		`https?://music\.yandex\.(?:ru|kz|ua|by|com)/album/(?:[0-9]+)/track/(?:[0-9]+)`,
 	)
 	YandexMusicAlbumRx = regexp.MustCompile(
-		`https?://(?:www\.)?music\.yandex\.(?:[^/]+)/album/([0-9]+)`,
+		`https?://music\.yandex\.(?:ru|kz|ua|by|com)/album/([0-9]+)`,
 	)
 	YandexMusicPlaylistRx = regexp.MustCompile(
-		`https?://(?:www\.)?music\.yandex\.(?:[^/]+)/users/([^/]+)/playlists/([0-9]+)`,
+		`https?://music\.yandex\.(?:ru|kz|ua|by|com)/users/([^/]+)/playlists/([0-9]+)`,
 	)
 
 	VKAlbumRX = regexp.MustCompile(
