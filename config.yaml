@@ -1,8 +1,7 @@
 port: 8590
 use_dev_logger: false
 
-youtube:
-  cookies: VAULT->/secret/orca/youtube_cookies
+youtube: VAULT->/secret/orca/youtube
 
 spotify: VAULT->/secret/orca/spotify
 
