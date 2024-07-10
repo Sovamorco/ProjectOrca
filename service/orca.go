@@ -88,27 +88,10 @@ func (o *Orca) initExtractors(ctx context.Context) error {
 		o.extractors.AddExtractor(v)
 	}
 
-	cookiesFileName := ""
-
-	if o.config.Youtube.Cookies != "" {
-		cookiesFile, err := os.CreateTemp(os.TempDir(), "cookies*")
-		if err != nil {
-			return errorx.Decorate(err, "create cookies file")
-		}
-
-		defer func() {
-			_ = cookiesFile.Close()
-		}()
-
-		_, err = cookiesFile.WriteString(o.config.Youtube.Cookies)
-		if err != nil {
-			return errorx.Decorate(err, "write cookies file")
-		}
-
-		cookiesFileName = cookiesFile.Name()
+	ytex, err := o.initYTExtractor()
+	if err != nil {
+		return errorx.Decorate(err, "init yt extractor")
 	}
-
-	ytex := ytdl.New(cookiesFileName)
 
 	if o.config.YandexMusic != nil {
 		ym := yandexmusic.New(ytex, o.config.YandexMusic.Token)
@@ -119,6 +102,33 @@ func (o *Orca) initExtractors(ctx context.Context) error {
 	o.extractors.AddExtractor(ytex)
 
 	return nil
+}
+
+func (o *Orca) initYTExtractor() (*ytdl.YTDL, error) {
+	if o.config.Youtube.Cookies == "" {
+		return ytdl.New(""), nil
+	}
+
+	cookiesFile, err := os.CreateTemp(os.TempDir(), "cookies*")
+	if err != nil {
+		return nil, errorx.Decorate(err, "create cookies file")
+	}
+
+	_, err = cookiesFile.WriteString(o.config.Youtube.Cookies)
+
+	_ = cookiesFile.Close()
+
+	if err != nil {
+		return nil, errorx.Decorate(err, "write cookies file")
+	}
+
+	//nolint:mnd // 0o444 - read only.
+	err = os.Chmod(cookiesFile.Name(), 0o444)
+	if err != nil {
+		return nil, errorx.Decorate(err, "change cookies file permissions")
+	}
+
+	return ytdl.New(cookiesFile.Name()), nil
 }
 
 func (o *Orca) Init(ctx context.Context) error {
