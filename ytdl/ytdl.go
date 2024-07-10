@@ -37,10 +37,14 @@ type SearchData struct {
 	Entries []TrackData `json:"entries"`
 }
 
-type YTDL struct{}
+type YTDL struct {
+	cookiesFile string
+}
 
-func New() *YTDL {
-	return &YTDL{}
+func New(cookiesFile string) *YTDL {
+	return &YTDL{
+		cookiesFile: cookiesFile,
+	}
 }
 
 func (y *YTDL) QueryMatches(context.Context, string) bool {
@@ -178,6 +182,11 @@ func (y *YTDL) getYTDLPOutput(ctx context.Context, args ...string) ([]byte, erro
 		"--format-sort", "+hasvid,proto,asr~48000,acodec:opus",
 		"-f", "ba*",
 	}
+
+	if y.cookiesFile != "" {
+		ytdlpArgs = append(ytdlpArgs, "--cookies", y.cookiesFile)
+	}
+
 	ytdlpArgs = append(ytdlpArgs, args...)
 
 	ytdlp := exec.CommandContext(ctx, "yt-dlp", ytdlpArgs...)

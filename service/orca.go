@@ -3,6 +3,7 @@ package orca
 import (
 	"context"
 	"errors"
+	"os"
 	"sync"
 
 	"ProjectOrca/vk"
@@ -87,7 +88,27 @@ func (o *Orca) initExtractors(ctx context.Context) error {
 		o.extractors.AddExtractor(v)
 	}
 
-	ytex := ytdl.New()
+	cookiesFileName := ""
+
+	if o.config.Youtube.Cookies != "" {
+		cookiesFile, err := os.CreateTemp(os.TempDir(), "cookies*")
+		if err != nil {
+			return errorx.Decorate(err, "create cookies file")
+		}
+
+		defer func() {
+			_ = cookiesFile.Close()
+		}()
+
+		_, err = cookiesFile.WriteString(o.config.Youtube.Cookies)
+		if err != nil {
+			return errorx.Decorate(err, "write cookies file")
+		}
+
+		cookiesFileName = cookiesFile.Name()
+	}
+
+	ytex := ytdl.New(cookiesFileName)
 
 	if o.config.YandexMusic != nil {
 		ym := yandexmusic.New(ytex, o.config.YandexMusic.Token)
