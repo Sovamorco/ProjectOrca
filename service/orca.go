@@ -88,7 +88,7 @@ func (o *Orca) initExtractors(ctx context.Context) error {
 		o.extractors.AddExtractor(v)
 	}
 
-	ytex, err := o.initYTExtractor()
+	ytex, err := o.initYTExtractor(ctx)
 	if err != nil {
 		return errorx.Decorate(err, "init yt extractor")
 	}
@@ -104,7 +104,9 @@ func (o *Orca) initExtractors(ctx context.Context) error {
 	return nil
 }
 
-func (o *Orca) initYTExtractor() (*ytdl.YTDL, error) {
+func (o *Orca) initYTExtractor(ctx context.Context) (*ytdl.YTDL, error) {
+	logger := zerolog.Ctx(ctx)
+
 	if o.config.Youtube.Cookies == "" {
 		return ytdl.New(""), nil
 	}
@@ -114,18 +116,16 @@ func (o *Orca) initYTExtractor() (*ytdl.YTDL, error) {
 		return nil, errorx.Decorate(err, "create cookies file")
 	}
 
+	defer func() {
+		err := cookiesFile.Close()
+		if err != nil {
+			logger.Error().Err(err).Msg("failed to close cookies file")
+		}
+	}()
+
 	_, err = cookiesFile.WriteString(o.config.Youtube.Cookies)
-
-	_ = cookiesFile.Close()
-
 	if err != nil {
 		return nil, errorx.Decorate(err, "write cookies file")
-	}
-
-	//nolint:mnd // 0o444 - read only.
-	err = os.Chmod(cookiesFile.Name(), 0o444)
-	if err != nil {
-		return nil, errorx.Decorate(err, "change cookies file permissions")
 	}
 
 	return ytdl.New(cookiesFile.Name()), nil
