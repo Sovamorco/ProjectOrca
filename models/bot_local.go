@@ -51,6 +51,7 @@ func startSession(token string) (*discordgo.Session, error) {
 	}
 
 	s.Identify.Intents = discordgo.IntentGuildVoiceStates
+	s.ShouldReconnectVoiceOnSessionError = false
 
 	err = s.Open()
 	if err != nil {
