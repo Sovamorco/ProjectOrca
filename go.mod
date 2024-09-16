@@ -15,7 +15,7 @@ require (
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/redis/go-redis/v9 v9.5.1
 	github.com/rs/zerolog v1.32.0
-	github.com/sovamorco/gommon v0.0.0-20231117111929-aaa03d851447
+	github.com/sovamorco/gommon v0.0.0-20240916165546-adb7f0e06a58
 	github.com/uptrace/bun v1.2.1
 	github.com/uptrace/bun/dialect/pgdialect v1.2.1
 	github.com/zmb3/spotify/v2 v2.4.1
