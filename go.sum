@@ -190,8 +190,8 @@ github.com/ryanuber/go-glob v1.0.0 h1:iQh3xXAumdQ+4Ufa5b25cRpC5TYKlno6hsv6Cb3pkB
 github.com/ryanuber/go-glob v1.0.0/go.mod h1:807d1WSdnB0XRJzKNil9Om6lcp/3a0v4qIHxIXzX/Yc=
 github.com/sovamorco/errorx v0.0.0-20240229170421-ba018a384e64 h1:3evqrBXrTMOXYK0Qucx5O4Wctx2/21z9Ue81xxVlBVo=
 github.com/sovamorco/errorx v0.0.0-20240229170421-ba018a384e64/go.mod h1:eQzdtdlNyN7etw6YCS4W4+lu442waxZYw5yvz0ULrRo=
-github.com/sovamorco/gommon v0.0.0-20240916165546-adb7f0e06a58 h1:2HQ6j0DBkEpvEePyOFYetRMnhAaCjHJUL4wHAl0WXGw=
-github.com/sovamorco/gommon v0.0.0-20240916165546-adb7f0e06a58/go.mod h1:7PylwG8QcMrZUBr1bG5BqCkAKTYkWEY95MHZlTfQjOw=
+github.com/sovamorco/gommon v0.0.0-20240916170314-1423fd401bd2 h1:T5ne2Y5Yhc2u45AXx85FVZ/ru+SNpqx3Cp7T1rgKakE=
+github.com/sovamorco/gommon v0.0.0-20240916170314-1423fd401bd2/go.mod h1:7PylwG8QcMrZUBr1bG5BqCkAKTYkWEY95MHZlTfQjOw=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
 github.com/stretchr/testify v1.2.2/go.mod h1:a8OnRcib4nhh0OaRAV+Yts87kKdq0PP7pXfy6kDkUVs=
 github.com/stretchr/testify v1.4.0/go.mod h1:j7eGeouHqKxXV5pUuKE4zz7dFj8WfuZ+81PSLYec5m4=
