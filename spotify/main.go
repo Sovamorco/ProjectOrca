@@ -198,7 +198,7 @@ func (s *Spotify) getAlbumTracksIter(ctx context.Context, id spotify.ID) ([]spot
 
 		res = append(res, page.Tracks...)
 
-		if len(res) == page.Total {
+		if len(res) == int(page.Total) {
 			break
 		}
 	}
