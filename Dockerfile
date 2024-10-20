@@ -32,7 +32,6 @@ RUN apk add --no-cache ffmpeg opus opus-dev
 
 WORKDIR /src
 COPY --from=builder /src/bin/ ./bin
-COPY config.yaml ./
 
 # don't want to cache yt-dlp specifically so put it here
 RUN apk add --no-cache yt-dlp

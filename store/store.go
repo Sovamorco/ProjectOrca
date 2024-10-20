@@ -3,19 +3,13 @@ package store
 import (
 	"context"
 	"database/sql"
-	"database/sql/driver"
 	"fmt"
 	"net"
 	"strconv"
 	"sync"
 	"time"
 
-	"github.com/lib/pq"
 	"github.com/rs/zerolog"
-
-	"github.com/hashicorp/vault-client-go"
-	"github.com/joomcode/errorx"
-	"github.com/mitchellh/mapstructure"
 
 	"github.com/go-redsync/redsync/v4/redis/goredis/v9"
 
@@ -23,6 +17,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
+	"github.com/uptrace/bun/driver/pgdriver"
 )
 
 const (
@@ -30,8 +25,6 @@ const (
 
 	lockExpiry          = 15 * time.Second
 	lockExtendFrequency = lockExpiry - 3*time.Second
-
-	databaseMountPath = "database"
 )
 
 type Config struct {
@@ -40,34 +33,12 @@ type Config struct {
 }
 
 type DBConfig struct {
-	// these are necessary fields
-	Host string `mapstructure:"host"`
-	Port int    `mapstructure:"port"`
-	DB   string `mapstructure:"db"`
-	SSL  bool   `mapstructure:"ssl"`
-
-	// and you either have to supply those
+	Host     string `mapstructure:"host"`
+	Port     int    `mapstructure:"port"`
+	DB       string `mapstructure:"db"`
+	SSL      bool   `mapstructure:"ssl"`
 	Username string `mapstructure:"username"`
 	Password string `mapstructure:"password"`
-
-	// or RoleName for vault db credentials
-	RoleName string `mapstructure:"role_name"`
-}
-
-func (s *DBConfig) getConnString() string {
-	sslmode := "disable"
-	if s.SSL {
-		sslmode = "enable"
-	}
-
-	return fmt.Sprintf(
-		"postgres://%s:%s@%s/%s?sslmode=%s",
-		s.Username,
-		s.Password,
-		net.JoinHostPort(s.Host, strconv.Itoa(s.Port)),
-		s.DB,
-		sslmode,
-	)
 }
 
 type RedisConfig struct {
@@ -95,51 +66,16 @@ type Store struct {
 	RedisPrefix      string
 }
 
-func getDBConfig(ctx context.Context, config *DBConfig, vc *vault.Client) (*DBConfig, error) {
-	if config.RoleName == "" {
-		return config, nil
-	} else if vc == nil {
-		return nil, errorx.IllegalArgument.New("no vault client passed to vault-interpolated database config")
-	}
+func NewStore(config *Config) *Store {
+	sqldb := sql.OpenDB(pgdriver.NewConnector(
+		pgdriver.WithAddr(fmt.Sprintf("%s:%d", config.DB.Host, config.DB.Port)),
+		pgdriver.WithDatabase(config.DB.DB),
+		pgdriver.WithInsecure(!config.DB.SSL),
+		pgdriver.WithUser(config.DB.Username),
+		pgdriver.WithPassword(config.DB.Password),
+		pgdriver.WithApplicationName("orca"),
+	))
 
-	res, err := vc.Secrets.DatabaseGenerateCredentials(ctx, config.RoleName, vault.WithMountPath(databaseMountPath))
-	if err != nil {
-		return nil, errorx.Decorate(err, "read db role")
-	}
-
-	var newConf DBConfig
-
-	err = mapstructure.Decode(res.Data, &newConf)
-	if err != nil {
-		return nil, errorx.Decorate(err, "load vault role credentials")
-	}
-
-	newConf.DB = config.DB
-	newConf.Host = config.Host
-	newConf.Port = config.Port
-	newConf.SSL = config.SSL
-
-	return &newConf, nil
-}
-
-func createConnectorWrapper(ctx context.Context, config *DBConfig, vc *vault.Client) CreateConnectorFunc {
-	return func() (driver.Connector, error) {
-		dbConfig, err := getDBConfig(ctx, config, vc)
-		if err != nil {
-			return nil, errorx.Decorate(err, "get db connection config")
-		}
-
-		c, err := pq.NewConnector(dbConfig.getConnString())
-		if err != nil {
-			return nil, errorx.Decorate(err, "create new connector")
-		}
-
-		return c, nil
-	}
-}
-
-func NewStore(ctx context.Context, config *Config, vc *vault.Client) *Store {
-	sqldb := sql.OpenDB(Driver{CreateConnectorFunc: createConnectorWrapper(context.WithoutCancel(ctx), &config.DB, vc)})
 	db := bun.NewDB(sqldb, pgdialect.New())
 
 	client := redis.NewClient(config.Broker.getOptions())

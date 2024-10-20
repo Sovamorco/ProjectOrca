@@ -22,20 +22,13 @@ To run the server - just do `task run`.
 
 Running in docker is recommended.
 
-To operate Orca requires Redis, Postgres and, optionally, Vault to be running (Vault required for credential storage and rotating database credentials).
+To operate Orca requires Redis and Postgres to be running.
 
 ### Configuration
 
-Config structure can be seen in `config.dev.yaml` or in `config.go`.
+Config structure can be seen in `config.dev.yaml`.
 
-To change the config, either build the docker image with a custom config:
-
-```
-FROM orca:latest
-COPY config.yaml /src/config.yaml
-```
-
-Or mount the config to `/src/config.yaml` in the container.
+To pass your own configuration, mount the config file in the container and pass the CONFIG_PATH environment variable with the path of the mounted config file.
 
 ## Optional modules
 

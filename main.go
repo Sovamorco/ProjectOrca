@@ -17,11 +17,9 @@ import (
 	"ProjectOrca/store"
 	"ProjectOrca/utils"
 
-	"github.com/hashicorp/vault-client-go"
 	"github.com/joomcode/errorx"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
-	gvault "github.com/sovamorco/gommon/vault"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/migrate"
 	"google.golang.org/grpc"
@@ -67,19 +65,7 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	var vc *vault.Client
-
-	var cfg *config.Config
-
-	vc, err := gvault.ClientFromEnv(ctx)
-	if err != nil {
-		logger.Debug().Err(err).Msg("Failed to create vault client")
-
-		cfg, err = config.LoadConfig(ctx)
-	} else {
-		cfg, err = config.LoadConfigVault(ctx, vc)
-	}
-
+	cfg, err := config.LoadConfig(ctx)
 	if err != nil {
 		logger.Fatal().Err(err).Msg("Error loading config")
 	}
@@ -92,21 +78,21 @@ func main() {
 
 	ctx = logger.WithContext(ctx)
 
-	err = run(ctx, vc, cfg)
+	err = run(ctx, cfg)
 	if err != nil {
 		logger.Fatal().Err(err).Msg("Error running")
 	}
 }
 
 func run(
-	ctx context.Context, vc *vault.Client, cfg *config.Config,
+	ctx context.Context, cfg *config.Config,
 ) error {
 	logger := zerolog.Ctx(ctx)
 
-	st := store.NewStore(ctx, &store.Config{
+	st := store.NewStore(&store.Config{
 		DB:     cfg.DB,
 		Broker: cfg.Redis,
-	}, vc)
+	})
 
 	err := doMigrate(ctx, st.DB)
 	if err != nil {
