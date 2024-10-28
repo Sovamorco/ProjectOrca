@@ -99,8 +99,6 @@ func run(
 		return errorx.Decorate(err, "do migrations")
 	}
 
-	port := 8590
-
 	var lc net.ListenConfig
 
 	lis, err := lc.Listen(ctx, "tcp", fmt.Sprintf(":%d", cfg.Port))
@@ -131,7 +129,7 @@ func run(
 
 	defer shutdown(ctx, srv, grpcServer)
 
-	logger.Info().Int("port", port).Msg("Started gRPC server")
+	logger.Info().Int("port", cfg.Port).Msg("Started gRPC server")
 
 	select {
 	case err = <-serverErrors:

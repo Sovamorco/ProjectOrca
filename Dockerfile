@@ -11,8 +11,8 @@ RUN go mod download
 COPY . .
 
 RUN go mod vendor && go mod verify
-RUN GOOS=linux GOARCH=amd64 GOMAXPROCS=1 go build -gcflags="all=-c=1" -ldflags="-w -s" -o /src/bin/healthcheck ./healthcheck
-RUN GOOS=linux GOARCH=amd64 GOMAXPROCS=1 go build -gcflags="all=-c=1" -ldflags="-w -s" -o /src/bin/orca .
+RUN --mount=type=cache,id=orca_build,target=/root/.cache/go-build GOOS=linux GOARCH=amd64 GOMAXPROCS=4 go build -gcflags="all=-c=4" -ldflags="-w -s" -o /src/bin/healthcheck ./healthcheck
+RUN --mount=type=cache,id=orca_build,target=/root/.cache/go-build GOOS=linux GOARCH=amd64 GOMAXPROCS=4 go build -gcflags="all=-c=4" -ldflags="-w -s" -o /src/bin/orca .
 
 
 FROM alpine:latest
