@@ -1,6 +1,6 @@
 # Orca
 
-Highly involved, language-independent, resilient and relatively thin server for Discord music playback written in Go.
+Highly involved, GRPC based, resilient and relatively thin server for Discord music playback written in Go.
 
 ## Client
 
