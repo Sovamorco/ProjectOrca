@@ -5,8 +5,7 @@ linters:
   - varnamelen
   - depguard
   - godox
-  - gomnd
-  - execinquery
+  - tenv
   - protogetter # I do not agree with it
   - goimports # conflicts with gofumpt
   - gci       # conflicts with gofumpt
