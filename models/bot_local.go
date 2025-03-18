@@ -10,8 +10,8 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/hashicorp/go-multierror"
-	"github.com/joomcode/errorx"
 	"github.com/rs/zerolog"
+	"github.com/sovamorco/errorx"
 )
 
 type Bot struct {

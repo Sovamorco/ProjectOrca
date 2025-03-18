@@ -7,7 +7,7 @@ import (
 	pb "ProjectOrca/proto"
 	"ProjectOrca/utils"
 
-	"github.com/joomcode/errorx"
+	"github.com/sovamorco/errorx"
 	"google.golang.org/grpc/codes"
 )
 

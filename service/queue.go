@@ -9,7 +9,7 @@ import (
 	"ProjectOrca/models"
 	pb "ProjectOrca/proto"
 
-	"github.com/joomcode/errorx"
+	"github.com/sovamorco/errorx"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 

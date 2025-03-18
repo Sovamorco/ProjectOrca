@@ -5,7 +5,7 @@ import (
 
 	"ProjectOrca/store"
 
-	"github.com/joomcode/errorx"
+	"github.com/sovamorco/errorx"
 	"github.com/sovamorco/gommon/config"
 )
 

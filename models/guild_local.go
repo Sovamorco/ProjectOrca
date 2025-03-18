@@ -13,8 +13,8 @@ import (
 	"ProjectOrca/store"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/joomcode/errorx"
 	"github.com/rs/zerolog"
+	"github.com/sovamorco/errorx"
 )
 
 const (

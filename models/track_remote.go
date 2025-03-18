@@ -13,7 +13,7 @@ import (
 	pb "ProjectOrca/proto"
 
 	"github.com/google/uuid"
-	"github.com/joomcode/errorx"
+	"github.com/sovamorco/errorx"
 	"github.com/uptrace/bun"
 	"google.golang.org/protobuf/types/known/durationpb"
 )

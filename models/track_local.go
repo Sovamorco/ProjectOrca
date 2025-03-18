@@ -14,8 +14,8 @@ import (
 
 	"ProjectOrca/models/notifications"
 
-	"github.com/joomcode/errorx"
 	"github.com/rs/zerolog"
+	"github.com/sovamorco/errorx"
 )
 
 const (

@@ -7,8 +7,8 @@ import (
 
 	"ProjectOrca/models"
 
-	"github.com/joomcode/errorx"
 	"github.com/rs/zerolog"
+	"github.com/sovamorco/errorx"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"

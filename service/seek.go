@@ -6,7 +6,7 @@ import (
 	"ProjectOrca/models"
 	pb "ProjectOrca/proto"
 
-	"github.com/joomcode/errorx"
+	"github.com/sovamorco/errorx"
 )
 
 func (o *Orca) Seek(ctx context.Context, in *pb.SeekRequest) (*pb.SeekReply, error) {

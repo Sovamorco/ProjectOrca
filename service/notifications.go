@@ -7,8 +7,8 @@ import (
 	"ProjectOrca/models/notifications"
 	pb "ProjectOrca/proto"
 
-	"github.com/joomcode/errorx"
 	"github.com/redis/go-redis/v9"
+	"github.com/sovamorco/errorx"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 

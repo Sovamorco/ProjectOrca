@@ -9,10 +9,10 @@ import (
 
 	"ProjectOrca/models"
 
-	"github.com/joomcode/errorx"
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"github.com/sovamorco/errorx"
 )
 
 type ResyncTarget int

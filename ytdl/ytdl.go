@@ -13,8 +13,8 @@ import (
 	"ProjectOrca/extractor"
 	"ProjectOrca/utils"
 
-	"github.com/joomcode/errorx"
 	"github.com/rs/zerolog"
+	"github.com/sovamorco/errorx"
 )
 
 //nolint:gochecknoglobals // this is really a constant, but it's not possible to declare it as such.

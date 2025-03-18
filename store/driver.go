@@ -213,7 +213,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/joomcode/errorx"
+	"github.com/sovamorco/errorx"
 )
 
 var ErrOpenNotSupported = errors.New("open is not supported")

@@ -7,7 +7,7 @@ import (
 	"ProjectOrca/models/notifications"
 	pb "ProjectOrca/proto"
 
-	"github.com/joomcode/errorx"
+	"github.com/sovamorco/errorx"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 

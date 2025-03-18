@@ -3,7 +3,7 @@ package utils
 import (
 	"regexp"
 
-	"github.com/joomcode/errorx"
+	"github.com/sovamorco/errorx"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/protoadapt"

@@ -3,7 +3,7 @@ package migrations
 import (
 	"embed"
 
-	"github.com/joomcode/errorx"
+	"github.com/sovamorco/errorx"
 	"github.com/uptrace/bun/migrate"
 )
 

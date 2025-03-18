@@ -17,9 +17,9 @@ import (
 	"ProjectOrca/store"
 	"ProjectOrca/utils"
 
-	"github.com/joomcode/errorx"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"github.com/sovamorco/errorx"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/migrate"
 	"google.golang.org/grpc"

@@ -12,8 +12,8 @@ import (
 
 	pb "ProjectOrca/proto"
 
-	"github.com/joomcode/errorx"
 	"github.com/rs/zerolog"
+	"github.com/sovamorco/errorx"
 	"google.golang.org/grpc/codes"
 )
 

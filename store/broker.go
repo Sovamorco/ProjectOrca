@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/go-redsync/redsync/v4"
-	"github.com/joomcode/errorx"
 	"github.com/rs/zerolog"
+	"github.com/sovamorco/errorx"
 
 	"github.com/redis/go-redis/v9"
 )
